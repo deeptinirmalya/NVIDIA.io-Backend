@@ -1,223 +1,221 @@
 from datetime import datetime
-from decimal import Decimal
-from enum import Enum
+from enum import Enum as PyEnum
 
-from beanie import Document, PydanticObjectId
-from bson.decimal128 import Decimal128
-from pydantic import Field, field_validator
-from pymongo import IndexModel, ASCENDING, DESCENDING
-from pymongo.collation import Collation
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    DateTime,
+    Enum,
+    Index,
+    Integer,
+    String,
+    Text,
+)
+from sqlalchemy.dialects.mysql import BIGINT
+from sqlalchemy.orm import Mapped, mapped_column
 
-class EventStatus(str, Enum):
+from db.models.base import Base
+
+
+class EventStatus(str, PyEnum):
     DRAFT = "DRAFT"
     PUBLISHED = "PUBLISHED"
     ONGOING = "ONGOING"
     COMPLETED = "COMPLETED"
     CANCELLED = "CANCELLED"
+    REGISTRATION_CLOSED = "REGISTRATION_CLOSED"
 
 
-class ParticipationType(str, Enum):
+class ParticipationType(str, PyEnum):
     SINGLE = "SINGLE"
     TEAM = "TEAM"
 
 
-class PaymentType(str, Enum):
+class PaymentType(str, PyEnum):
     FREE = "FREE"
     PAID = "PAID"
 
 
-class PaymentScope(str, Enum):
-
+class PaymentScope(str, PyEnum):
+    SINGLE = "SINGLE"
     TEAM = "TEAM"
-    PARTICIPANT = "PARTICIPANT"
 
 
-class EventCategory(str, Enum):
+class EventCategory(str, PyEnum):
     TECH = "TECH"
     NON_TECH = "NON_TECH"
-    SPORTS = "SPORTS"
     CULTURAL = "CULTURAL"
+    SPORTS = "SPORTS"
+    ESPORTS = "ESPORTS"
 
 
-class GenderType(str, Enum):
+class GenderType(str, PyEnum):
     BOYS = "BOYS"
     GIRLS = "GIRLS"
     BOTH = "BOTH"
 
 
-class Event(Document):
+class Event(Base):
+    __tablename__ = "events"
 
-    @field_validator("category", mode="before")
-    @classmethod
-    def normalize_category(cls, value):
-        if isinstance(value, str):
-            normalized = value.strip().upper().replace(" ", "_").replace("-", "_")
-            alias_map = {
-                "NONTECH": "NON_TECH",
-                "CULTURE": "CULTURAL",
-                "CULTURAL": "CULTURAL",
-            }
-            return alias_map.get(normalized, normalized)
-        return value
-
-    name: str = Field(min_length=3, max_length=150)
-
-    about: str
-    rules: list[str] = Field(default_factory=list)
-
-    venue: str
-
-    category: EventCategory
-
-    status: EventStatus = EventStatus.DRAFT
-
-    participation_type: ParticipationType
-
-    payment_type: PaymentType = PaymentType.FREE
-
-    payment_scope: PaymentScope | None = None
-
-    gender: GenderType = GenderType.BOTH
-
-    fee: Decimal | None = Field(
-        default=None,
-        ge=Decimal("0")
+    __table_args__ = (
+        CheckConstraint(
+            "(is_paid = FALSE AND price = 0) "
+            "OR (is_paid = TRUE AND price > 0)",
+            name="check_event_price",
+        ),
+        CheckConstraint(
+            "("
+            "participation_type = 'SINGLE' "
+            "AND min_team_size IS NULL "
+            "AND max_team_size IS NULL"
+            ") "
+            "OR "
+            "("
+            "participation_type = 'TEAM' "
+            "AND min_team_size IS NOT NULL "
+            "AND max_team_size IS NOT NULL "
+            "AND min_team_size > 0 "
+            "AND max_team_size >= min_team_size"
+            ")",
+            name="check_event_team_size",
+        ),
+        CheckConstraint(
+            "registration_end_time IS NULL "
+            "OR registration_end_time >= registration_start_time",
+            name="check_event_registration_time",
+        ),
+        CheckConstraint(
+            "registration_end_time IS NULL "
+            "OR event_start_time IS NULL "
+            "OR registration_end_time <= event_start_time",
+            name="check_event_registration_before_event",
+        ),
+        CheckConstraint(
+            "event_end_time IS NULL "
+            "OR event_start_time IS NULL "
+            "OR event_end_time >= event_start_time",
+            name="check_event_time",
+        ),
+        CheckConstraint(
+            "currency = 'INR'",
+            name="check_event_currency",
+        ),
+        Index("idx_events_status", "status"),
+        Index("idx_events_type", "participation_type"),
+        Index("idx_events_start_time", "event_start_time"),
     )
 
-    currency: str = "INR"
-
-    team_size_min: int | None = Field(
-        default=None,
-        ge=1
+    id: Mapped[int] = mapped_column(
+        BIGINT(unsigned=True),
+        primary_key=True,
+        autoincrement=True,
     )
 
-    team_size_max: int | None = Field(
-        default=None,
-        ge=1
+    name: Mapped[str] = mapped_column(
+        String(200),
+        unique=True,
+        nullable=False,
     )
 
-
-    max_participants: int | None = Field(
-        default=None,
-        ge=1
+    about: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
     )
 
-    registration_start: datetime
-    registration_end: datetime
-
-    start_time: datetime
-    end_time: datetime
-
-    created_by: str
-
-    created_at: datetime = Field(
-        default_factory=datetime.utcnow
+    rules: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
     )
 
-    updated_at: datetime = Field(
-        default_factory=datetime.utcnow
+    venue: Mapped[str | None] = mapped_column(
+        String(200),
+        nullable=True,
     )
 
+    registration_start_time: Mapped[datetime] = mapped_column(
+        DateTime,
+        nullable=False,
+    )
 
+    registration_end_time: Mapped[datetime | None] = mapped_column(
+        DateTime,
+        nullable=True,
+    )
 
-    @field_validator("team_size_max")
-    @classmethod
-    def validate_team_size(
-        cls,
-        value: int | None,
-        info
-    ):
-        if value is not None:
-            minimum = info.data.get("team_size_min")
+    event_start_time: Mapped[datetime | None] = mapped_column(
+        DateTime,
+        nullable=True,
+    )
 
-            if minimum is not None and value < minimum:
-                raise ValueError(
-                    "team_size_max cannot be smaller than team_size_min"
-                )
+    event_end_time: Mapped[datetime | None] = mapped_column(
+        DateTime,
+        nullable=True,
+    )
 
-        return value
+    status: Mapped[EventStatus] = mapped_column(
+        Enum(EventStatus, name="event_status_enum"),
+        nullable=False,
+        default=EventStatus.DRAFT,
+    )
 
-    @field_validator("payment_scope")
-    @classmethod
-    def validate_payment_scope(
-        cls,
-        value: PaymentScope | None,
-        info
-    ):
-        payment_type = info.data.get("payment_type")
-        participation_type = info.data.get("participation_type")
+    participation_type: Mapped[ParticipationType] = mapped_column(
+        Enum(ParticipationType, name="participation_type_enum"),
+        nullable=False,
+        default=ParticipationType.SINGLE,
+    )
 
-        if payment_type == PaymentType.FREE and value is not None:
-            raise ValueError(
-                "payment_scope must be None for free events"
-            )
+    category: Mapped[EventCategory] = mapped_column(
+        Enum(EventCategory, name="event_category_enum"),
+        nullable=False,
+        default=EventCategory.TECH,
+    )
 
-        if (
-            payment_type == PaymentType.PAID
-            and participation_type == ParticipationType.TEAM
-            and value is None
-        ):
-            raise ValueError(
-                "payment_scope is required for paid team events"
-            )
+    gender_type: Mapped[GenderType] = mapped_column(
+        Enum(GenderType, name="gender_type_enum"),
+        nullable=False,
+        default=GenderType.BOTH,
+    )
 
-        return value
+    is_paid: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
 
-    @field_validator("fee", mode="before")
-    @classmethod
-    def normalize_fee(cls, value):
-        if value is None:
-            return value
-        if isinstance(value, Decimal128):
-            return value.to_decimal()
-        if isinstance(value, (int, float, str, Decimal)):
-            return Decimal(str(value))
-        return value
+    price: Mapped[int] = mapped_column(
+        BIGINT(unsigned=True),
+        nullable=False,
+        default=0,
+    )
 
-    @field_validator("fee")
-    @classmethod
-    def validate_fee(
-        cls,
-        value: Decimal | None,
-        info
-    ):
-        payment_type = info.data.get("payment_type")
+    currency: Mapped[str] = mapped_column(
+        String(3),
+        nullable=False,
+        default="INR",
+    )
 
-        if payment_type == PaymentType.PAID:
-            if value is None or value <= 0:
-                raise ValueError(
-                    "Paid event must have a fee greater than zero"
-                )
+    min_team_size: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+    )
 
-        if payment_type == PaymentType.FREE:
-            if value is not None and value != 0:
-                raise ValueError(
-                    "Free event cannot have a positive fee"
-                )
+    max_team_size: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+    )
 
-        return value
+    banner_url: Mapped[str | None] = mapped_column(
+        String(300),
+        nullable=True,
+    )
 
-    class Settings:
-        name = "events"
-        indexes = [
-            IndexModel(
-                [
-                    ("status", ASCENDING),
-                    ("registration_start", ASCENDING)
-                ]
-            ),
-            IndexModel(
-                [("start_time", ASCENDING)]
-            ),
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        nullable=False,
+    )
 
-            IndexModel(
-                [("created_at", DESCENDING)]
-            ),
-
-            IndexModel(
-                [
-                    ("category", ASCENDING),
-                    ("status", ASCENDING)
-                ]
-            ),
-        ]
+    updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime,
+        nullable=True,
+    )

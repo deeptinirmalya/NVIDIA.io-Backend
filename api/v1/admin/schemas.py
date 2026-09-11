@@ -6,10 +6,10 @@ from db.models.event import EventStatus, ParticipationType, PaymentType, Payment
 
 
 
-class AdminMessageResponse(BaseModel):
-    """Standard message response for admin operations."""
-    success: bool
-    message: str
+# class AdminMessageResponse(BaseModel):
+#     """Standard message response for admin operations."""
+#     success: bool
+#     message: str
 
 
 class EventCreate(BaseModel):

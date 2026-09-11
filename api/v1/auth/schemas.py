@@ -3,7 +3,6 @@ import re
 
 
 class UserRegister(BaseModel):
-    name: str = Field(...,min_length=5, max_length=200, description="The user's name")
     email: EmailStr = Field(..., description="The user's email address")
     password: str = Field(..., min_length=8, description="The user's plain-text password")
 
@@ -27,8 +26,10 @@ class UserLogin(BaseModel):
     cf_turnstile_response: str = Field(...)
 
 
-class ResendVerification(BaseModel):
-    email: EmailStr = Field(..., description="The user's email address")
+
+
+
+
 
 
 

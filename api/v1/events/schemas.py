@@ -1,115 +1,222 @@
-"""
-Schemas for events API.
-"""
-from pydantic import BaseModel, Field
-from typing import Optional
-from beanie import PydanticObjectId
-from decimal import Decimal
+from datetime import datetime
+from enum import Enum
+
+from pydantic import BaseModel, Field, model_validator, ConfigDict
 
 
-class EventDetailResponse(BaseModel):
-    """Response for event details."""
-    id: str = Field(..., alias="_id")
+class EventStatus(str, Enum):
+    DRAFT = "DRAFT"
+    PUBLISHED = "PUBLISHED"
+    ONGOING = "ONGOING"
+    COMPLETED = "COMPLETED"
+    CANCELLED = "CANCELLED"
+    REGISTRATION_CLOSED = "REGISTRATION_CLOSED"
+
+
+class ParticipationType(str, Enum):
+    SINGLE = "SINGLE"
+    TEAM = "TEAM"
+
+
+class PaymentType(str, Enum):
+    FREE = "FREE"
+    PAID = "PAID"
+
+
+class PaymentScope(str, Enum):
+    SINGLE = "SINGLE"
+    TEAM = "TEAM"
+
+
+class EventCategory(str, Enum):
+    TECH = "TECH"
+    NON_TECH = "NON_TECH"
+    CULTURAL = "CULTURAL"
+    SPORTS = "SPORTS"
+    ESPORTS = "ESPORTS"
+
+
+class GenderType(str, Enum):
+    BOYS = "BOYS"
+    GIRLS = "GIRLS"
+    BOTH = "BOTH"
+
+
+class EventCreate(BaseModel):
+
+    name: str = Field(
+        ...,
+        min_length=1,
+        max_length=200,
+    )
+
+    about: str | None = None
+
+    rules: str | None = None
+
+    venue: str | None = Field(
+        default=None,
+        max_length=200,
+    )
+
+    registration_start_time: datetime
+
+    registration_end_time: datetime | None = None
+
+    event_start_time: datetime | None = None
+
+    event_end_time: datetime | None = None
+
+    status: EventStatus = EventStatus.DRAFT
+
+    participation_type: ParticipationType = (
+        ParticipationType.SINGLE
+    )
+
+    category: EventCategory = EventCategory.TECH
+
+    gender_type: GenderType = GenderType.BOTH
+
+    is_paid: bool = False
+
+    price: int = Field(
+        default=0,
+        ge=0,
+    )
+
+    currency: str = Field(
+        default="INR",
+        min_length=3,
+        max_length=3,
+    )
+
+    min_team_size: int | None = Field(
+        default=None,
+        ge=1,
+    )
+
+    max_team_size: int | None = Field(
+        default=None,
+        ge=1,
+    )
+
+    banner: str  # Base64 image
+
+    @model_validator(mode="after")
+    def validate_event(self):
+
+        if not self.is_paid and self.price != 0:
+            raise ValueError(
+                "price must be 0 when is_paid is False"
+            )
+
+        if self.is_paid and self.price <= 0:
+            raise ValueError(
+                "price must be greater than 0 when is_paid is True"
+            )
+
+        if self.currency != "INR":
+            raise ValueError(
+                "currency must be INR"
+            )
+
+        if self.participation_type == ParticipationType.SINGLE:
+
+            if (
+                self.min_team_size is not None
+                or self.max_team_size is not None
+            ):
+                raise ValueError(
+                    "min_team_size and max_team_size "
+                    "must be null for SINGLE events"
+                )
+
+        elif self.participation_type == ParticipationType.TEAM:
+
+            if self.min_team_size is None:
+                raise ValueError(
+                    "min_team_size is required for TEAM events"
+                )
+
+            if self.max_team_size is None:
+                raise ValueError(
+                    "max_team_size is required for TEAM events"
+                )
+
+            if self.max_team_size < self.min_team_size:
+                raise ValueError(
+                    "max_team_size must be greater than "
+                    "or equal to min_team_size"
+                )
+
+        if (
+            self.registration_end_time is not None
+            and self.registration_end_time
+            < self.registration_start_time
+        ):
+            raise ValueError(
+                "registration_end_time cannot be before "
+                "registration_start_time"
+            )
+
+        if (
+            self.registration_end_time is not None
+            and self.event_start_time is not None
+            and self.registration_end_time
+            > self.event_start_time
+        ):
+            raise ValueError(
+                "registration_end_time cannot be after "
+                "event_start_time"
+            )
+
+        if (
+            self.event_end_time is not None
+            and self.event_start_time is not None
+            and self.event_end_time
+            < self.event_start_time
+        ):
+            raise ValueError(
+                "event_end_time cannot be before "
+                "event_start_time"
+            )
+
+        return self
+
+
+
+
+
+
+
+
+
+
+# ==================================== RESPONSE FORMAT =============================
+
+class EventResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
     name: str
-    about: str
-    category: str
-    participation_type: str
-    payment_type: str
-    fee: Optional[Decimal]
-    currency: str
-    team_size_min: Optional[int]
-    team_size_max: Optional[int]
-    max_participants: Optional[int]
-    registration_start: str
-    registration_end: str
-    start_time: str
-    end_time: str
-    status: str
+    about: str | None
+    rules: str | None
+    venue: str | None
 
-    class Config:
-        populate_by_name = True
+    registration_start_time: datetime
+    registration_end_time: datetime | None
 
+    event_start_time: datetime | None
+    event_end_time: datetime | None
 
-class RegisterSingleFreeRequest(BaseModel):
-    """Request to register for SINGLE + FREE event."""
-    pass  # No additional fields needed
+    status: EventStatus
+    participation_type: ParticipationType
+    category: EventCategory
+    gender_type: GenderType
+
+    is_paid: bool
+    price: int
 
 
-class RegisterSingleFreeResponse(BaseModel):
-    """Response for SINGLE + FREE registration."""
-    success: bool
-    message: str
-    data: dict = Field(
-        ...,
-        example={
-            "registrationId": "507f1f77bcf86cd799439011",
-            "status": "CONFIRMED",
-            "eventId": "507f1f77bcf86cd799439012",
-        }
-    )
-
-
-class RegisterSinglePaidRequest(BaseModel):
-    """Request to initiate payment for SINGLE + PAID event."""
-    pass  # No additional fields needed
-
-
-class RegisterSinglePaidResponse(BaseModel):
-    """Response for SINGLE + PAID registration with Razorpay order."""
-    success: bool
-    message: str
-    data: dict = Field(
-        ...,
-        example={
-            "razorpayOrderId": "order_IluGWxBm9U8zJ8",
-            "amount": 5000,
-            "currency": "INR",
-            "paymentId": "507f1f77bcf86cd799439013",
-            "registrationId": "507f1f77bcf86cd799439011",
-        }
-    )
-
-
-class RegisterTeamFreeRequest(BaseModel):
-    """Request to register team for TEAM + FREE event."""
-    team_id: str | None = Field(default=None, description="Existing team ID")
-    team_name: str | None = Field(default=None, min_length=2, max_length=100, description="Team name to create if team_id is not provided")
-
-
-class RegisterTeamFreeResponse(BaseModel):
-    """Response for TEAM + FREE registration."""
-    success: bool
-    message: str
-    data: dict = Field(
-        ...,
-        example={
-            "registrationId": "507f1f77bcf86cd799439011",
-            "teamId": "507f1f77bcf86cd799439014",
-            "status": "CONFIRMED",
-            "memberCount": 3,
-        }
-    )
-
-
-class RegisterTeamPaidRequest(BaseModel):
-    """Request to initiate payment for TEAM + PAID event (Captain only)."""
-    team_id: str | None = Field(default=None, description="Existing team ID")
-    team_name: str | None = Field(default=None, min_length=2, max_length=100, description="Team name to create if team_id is not provided")
-
-
-class RegisterTeamPaidResponse(BaseModel):
-    """Response for TEAM + PAID registration with Razorpay order."""
-    success: bool
-    message: str
-    data: dict = Field(
-        ...,
-        example={
-            "razorpayOrderId": "order_IluGWxBm9U8zJ8",
-            "amount": 5000,
-            "currency": "INR",
-            "paymentId": "507f1f77bcf86cd799439013",
-            "registrationId": "507f1f77bcf86cd799439011",
-            "teamId": "507f1f77bcf86cd799439014",
-            "memberCount": 3,
-        }
-    )
+    min_team_size: int | None
+    max_team_size: int | None

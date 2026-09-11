@@ -1,4 +1,6 @@
-from upstash_redis import Redis
+from upstash_redis.asyncio import Redis
+import json
+
 from core.config import settings
 
 # Initialize Upstash Redis Cache via REST (HTTP)
@@ -8,8 +10,23 @@ redis_client = Redis(
     token=settings.UPSTASH_REDIS_REST_TOKEN
 )
 
-def set_value(key: str, value: str, expire: int = 3600):
-    redis_client.set(key, value, ex=expire)
 
-def get_value(key: str):
-    return redis_client.get(key)
+async def set_value(key: str, value, expire: int = 3600):
+    await redis_client.set(
+        key,
+        json.dumps(value),
+        ex=expire
+    )
+
+
+async def get_value(key: str):
+    value = await redis_client.get(key)
+
+    if value is None:
+        return None
+
+    return json.loads(value)
+
+
+async def delete_value(key: str):
+    await redis_client.delete(key)

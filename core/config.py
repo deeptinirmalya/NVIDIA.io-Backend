@@ -41,8 +41,16 @@ class Settings(BaseSettings):
     CELERY_WORKER_BROKER_URL: str = os.getenv("CELERY_WORKER_BROKER_URL")
     
     # Database
-    MONGODB_URL: str = os.getenv("MONGODB_URL")
-    MONGODB_DB_NAME: str = os.getenv("MONGODB_DB_NAME", "sjn_demo_db")
+    # MONGODB_URL: str = os.getenv("MONGODB_URL")
+    # MONGODB_DB_NAME: str = os.getenv("MONGODB_DB_NAME", "sjn_demo_db")
+
+    TIDB_HOST: str = os.getenv("TIDB_HOST")
+    TIDB_PORT: int = os.getenv("TIDB_PORT")
+    TIDB_USER: str = os.getenv("TIDB_USER")
+    TIDB_PASSWORD: str = os.getenv("TIDB_PASSWORD")
+    TIDB_DATABASE: str = os.getenv("TIDB_DATABASE")
+
+    TIDB_CA_CERT: str = "db/certs/tidb.pem"
     
     # Sentry
     SENTRY_DSN: str = os.getenv("SENTRY_DSN", "")
@@ -83,9 +91,7 @@ class Settings(BaseSettings):
         # Default: True for production (HTTPS), False for development (HTTP)
         return self.is_production
 
-    # ─── Razorpay Payment Gateway ─────────────────────────────────────────────────────
-    # In production: These MUST be set via environment variables
-    # In development: Optional with fallback to test values for testing
+    # ─── Razorpay Payment Gateway 
     RAZORPAY_KEY_ID: str = os.getenv("RAZORPAY_KEY_ID")
     RAZORPAY_KEY_SECRET: str = os.getenv("RAZORPAY_KEY_SECRET")
     RAZORPAY_WEBHOOK_SECRET: str = os.getenv("RAZORPAY_WEBHOOK_SECRET")
@@ -111,38 +117,34 @@ class Settings(BaseSettings):
         # PRODUCTION: __Host-refresh_token
         return "__Host-refresh_token" if self.COOKIE_SECURE else "refresh_token"
 
-    def ensure_production_ready(self) -> None:
-        if not self.is_production:
-            return
+    RENDER_SECRET_HEADER_NAME: str = os.getenv("RENDER_SECRET_HEADER_NAME", "shgdjhgsdhjgsdhjsd")
+    SECRET_HEADER_VALUE: str = os.getenv("SECRET_HEADER_VALUE", "sgdyutsudtyusghjgshygs")
 
-        placeholders = {
-            "JWT_SECRET_KEY": self.JWT_SECRET_KEY,
-            "RAZORPAY_KEY_ID": self.RAZORPAY_KEY_ID,
-            "RAZORPAY_KEY_SECRET": self.RAZORPAY_KEY_SECRET,
-            "RAZORPAY_WEBHOOK_SECRET": self.RAZORPAY_WEBHOOK_SECRET,
-            "MONGODB_URL": self.MONGODB_URL,
-        }
+    
 
-        dummy_values = (
-            "fallback-secret-key-at-least-32-chars-long",
-            "rzp_test_DummyKeyId123456",
-            "rzp_test_DummySecretKey123456",
-            "whsec_test_DummyWebhookSecret123",
-        )
 
-        invalid = [
-            name for name, value in placeholders.items()
-            if value in (None, "") or value in dummy_values
-        ]
 
-        if invalid:
-            raise RuntimeError(
-                "Production configuration is incomplete. Set valid values for: "
-                + ", ".join(invalid)
-            )
+
+    
+    #==================== Firebase Cradential ========================
+    PROJECT_ID: str = os.getenv("PROJECT_ID")
+    PRIVATE_KEY_ID: str = os.getenv("PRIVATE_KEY_ID")
+    PRIVATE_KEY: str = os.getenv("PRIVATE_KEY")
+    CLIENT_EMAIL: str = os.getenv("CLIENT_EMAIL")
+    CLIENT_ID: str = os.getenv("CLIENT_ID")
+    AUTH_URI: str = os.getenv("AUTH_URI")
+    TOKEN_URI: str = os.getenv("TOKEN_URI")
+    AUTH_PROVIDER_X509_CERT_URL: str = os.getenv("AUTH_PROVIDER_X509_CERT_URL")
+    CLIENT_X509_CERT_URL: str = os.getenv("CLIENT_X509_CERT_URL")
+    UNIVERSE_DOMAIN: str = os.getenv("UNIVERSE_DOMAIN")
 
     class Config:
         case_sensitive = True
 
+    # Cloudinary cradentials
+    CLOUDINARY_CLOUD_NAME: str = os.getenv("CLOUDINARY_CLOUD_NAME")
+    CLOUDINARY_API_KEY: str = os.getenv("CLOUDINARY_API_KEY")
+    CLOUDINARY_API_SECRET: str = os.getenv("CLOUDINARY_API_SECRET")
+
+
 settings = Settings()
-settings.ensure_production_ready()

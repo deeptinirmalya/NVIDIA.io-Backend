@@ -1,12 +1,17 @@
 import requests
 from mailtrap import Mail, Address, MailtrapClient
 from datetime import timezone
+from zoneinfo import ZoneInfo
 from worker.tasks import send_wl_mail
 import secrets
 import string
 import io
 import pyotp
 import qrcode
+import cloudinary
+import cloudinary.uploader
+
+from core.config import settings
 
 
 def mailtrap_service(subject, body, to_email):
@@ -35,6 +40,14 @@ def ensure_aware(dt):
 
 
 
+IST = ZoneInfo("Asia/Kolkata")
+def ensure_aware_ist(dt):
+    if dt and dt.tzinfo is None:
+        return dt.replace(tzinfo=IST)
+    return dt
+
+
+
 def generate_random_event_code(length: int = 6) -> str:
     letters = string.ascii_uppercase
     digits = string.digits
@@ -49,55 +62,12 @@ def generate_random_event_code(length: int = 6) -> str:
 
 
 
-
-
-
-# ==============================================================================
-# def generate_totp_qr(
-#     account_name: str,
-#     issuer_name: str = "MyApp",
-# ) -> tuple[str, bytes]:
-
-#     secret = pyotp.random_base32()
-
-#     # Create the provisioning URI
-#     provisioning_uri = pyotp.TOTP(secret).provisioning_uri(
-#         name=account_name,
-#         issuer_name=issuer_name,
-#     )
-
-#     # Generate QR Code
-#     qr = qrcode.QRCode(
-#         version=1,
-#         error_correction=qrcode.constants.ERROR_CORRECT_M,
-#         box_size=10,
-#         border=4,)
-
-#     qr.add_data(provisioning_uri)
-#     qr.make(fit=True)
-
-#     image = qr.make_image(fill_color="black", back_color="white")
-
-#     buffer = io.BytesIO()
-#     image.save(buffer, format="PNG")
-
-#     return secret, buffer.getvalue()
-
-
-# secret, qr_bytes = generate_totp_qr(
-#     account_name="user@example.com",
-#     issuer_name="HireNest"
-# )
-
-# Encrypt and store `secret` in your database.
-
-# Return `qr_bytes` from your FastAPI endpoint.
-
-
-def verify_totp(secret: str, user_otp: str) -> bool:
-    totp = pyotp.TOTP(secret)
-    return totp.verify(user_otp, valid_window=1)
-
+cloudinary.config(
+    cloud_name=settings.CLOUDINARY_CLOUD_NAME,
+    api_key=settings.CLOUDINARY_API_KEY,
+    api_secret=settings.CLOUDINARY_API_SECRET,
+    secure=True
+)
 # ======================================================================
 
 def mail_service(subject, body, receiver_email, priority, is_real = True):
@@ -105,5 +75,6 @@ def mail_service(subject, body, receiver_email, priority, is_real = True):
         mailtrap_service(subject, body, receiver_email)
     else:
         send_wl_mail(subject, body, receiver_email, priority)
+
 
 

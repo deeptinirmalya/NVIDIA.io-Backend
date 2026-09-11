@@ -1,33 +1,61 @@
-import base64
 import uuid
 import httpx
 import logging
 from datetime import timedelta
-from fastapi import APIRouter, Depends, Request, Response, HTTPException, status, Query
+from fastapi import APIRouter, Depends, Request, Response, HTTPException, status, Query, Header
 from fastapi.responses import JSONResponse
+import firebase_admin
+from firebase_admin import credentials, auth
 from typing import Optional
 import hashlib
 import secrets
+import re
 
-from bson import ObjectId
-from db.models.auth import User, EmailVerification, RefreshToken, LoginHistory, TokenBlacklist, UserStatus, UserRole, EmailVerificationStatus
-from db.session import get_tx_session
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, update, desc, asc
+
+from db.models.auth import User, RefreshToken, LoginHistory, TokenBlacklist, UserStatus, UserRole, Profile
+from db.session import get_db
 from security import auth as security
 from security.rate_limiter import rate_limiter
+from security.auth import get_client_info
 from utils import auth_util, util
 from templates import email_templates 
 
 
-from .schemas import UserLogin, UserRegister, ResendVerification
+from .schemas import UserLogin, UserRegister
 from core.config import settings
 from monitoring.posthog import posthog
 
 logger = logging.getLogger("auth")
 
 
+
+# 1. Build dictionary from your existing settings instance
+service_account_info = {
+    "type": "service_account",
+    "project_id": settings.PROJECT_ID,
+    "private_key_id": settings.PRIVATE_KEY_ID,
+    "private_key": settings.PRIVATE_KEY.replace("\\n", "\n") if settings.PRIVATE_KEY else "",
+    "client_email": settings.CLIENT_EMAIL,
+    "client_id": settings.CLIENT_ID,
+    "auth_uri": settings.AUTH_URI,
+    "token_uri": settings.TOKEN_URI,
+    "auth_provider_x509_cert_url": settings.AUTH_PROVIDER_X509_CERT_URL,
+    "client_x509_cert_url": settings.CLIENT_X509_CERT_URL,
+    "universe_domain": settings.UNIVERSE_DOMAIN
+}
+
+# 2. Initialize Firebase Admin SDK once
+if not firebase_admin._apps:
+    cred = credentials.Certificate(service_account_info)
+    firebase_admin.initialize_app(cred)
+
+
+
 auth_router = APIRouter()
 
-async def verify_turnstile(request: Request, body: UserLogin) -> bool:
+async def verify_turnstile(request: Request, token) -> bool:
 
     # CLOUDFLARE_VERIFY_URL = settings.CLOUDFLARE_VERIFY_URL
     # TURNSTILE_SECRET_KEY = settings.TURNSTILE_SECRET_KEY
@@ -41,7 +69,7 @@ async def verify_turnstile(request: Request, body: UserLogin) -> bool:
     #     )
 
     # # Retrieve the user's real IP extracted by your VPSCloudflareMiddleware
-    # client_ip: Optional[str] = getattr(request.state, "client_ip", None)
+    # client_ip: Optional[str] = request.state.client_ip if hasattr(request.state, "client_ip") else None
 
     # # Send POST request to Cloudflare verification server
     # async with httpx.AsyncClient(timeout=5.0) as client:
@@ -81,403 +109,429 @@ async def get_current_user(
         "message": "Valid session"
     }
 
-@auth_router.get("/profile")
-async def get_profile(
-    user_data: dict = Depends(security.token_required(allowed_roles=["ADMIN", "STUDENT", "SUPERADMIN"]))
-):
-    user_id = user_data.get("user_id")
-    user = await User.get(ObjectId(user_id) if isinstance(user_id, str) and len(user_id) == 24 else user_id)
+#apply rate limit
+@auth_router.post("/google")
+async def google(
+    authorization: str = Header(..., alias="Authorization"),
+    x_turnstile_token: str = Header(...),
+    db: AsyncSession = Depends(get_db)
+    ):
+    if not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Invalid Authorization header format. Use 'Bearer <token>'")
 
-    
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+    token = authorization.split(" ", 1)[1].strip()
+
+    try:
+        # verify cloudeflare x_turnstile_token token
+        valid_request = await verify_turnstile(Request, x_turnstile_token)
+        if not valid_request:
+            logger.warning("Invalid request may but detected")
+            raise HTTPException(status_code=403, detail="invalid request")
         
-    return {
-        "success": True,
-        "message": "Profile retrieved",
-        "data": {
-            "id": str(user.id),
-            "email": user.email,
-            "role": user.role.value if hasattr(user.role, 'value') else user.role,
-            "status": user.status.value if hasattr(user.status, 'value') else user.status,
-            "created_at": user.created_at.isoformat()
-        }
-    }
-
-
-@auth_router.post("/register")
-async def register_user(
-    data: UserRegister,
-    session=Depends(get_tx_session),
-    _=Depends(rate_limiter(max_tokens=5, refill_rate=0.1, mode="login"))
-):
-    logger.info("Received user registration request", extra={"email": data.email, "user_name": data.name})
-    
-    # stp 1: Check existing user
-    existing_user_docs = await User.find_one(User.email == data.email)
-    if existing_user_docs:
-        logger.warning("Registration failed: Email already registered", extra={"email": data.email})
-        posthog.capture(distinct_id=data.email, event="user_registration_failed", properties={"reason": "email_already_exists"})
-        raise HTTPException(status_code=409, detail="Email already registered")
-    
-    # stp 2: Validate password (do this BEFORE database insertions)
-    st, msg = auth_util.validate_password(data.password)
-    if not st:
-        logger.warning("Registration failed: Password validation failed", extra={"email": data.email, "reason": msg})
-        raise HTTPException(status_code=422, detail=msg)
-
-    try:
+        client = await get_client_info(Request)
         now = auth_util.get_now_utc()
+        decoded_token = auth.verify_id_token(token, clock_skew_seconds=60)
 
-        # stp 3: Insert user 
-        new_user = User(
-            name=data.name,
-            email=data.email,
-            password_hash=auth_util.hash_password(data.password),
-            created_at=now
-        )
-        await new_user.insert(session=session)
-        logger.info("Successfully inserted user record", extra={"user_id": str(new_user.id), "email": data.email})
+        if not decoded_token.get("email_verified"):
+            raise HTTPException(status_code=401, detail="Email not verified")
 
-        # stp 4: Create verification token
-        plain_token = secrets.token_urlsafe(32)
-        hashed_token = hashlib.sha256(plain_token.encode()).hexdigest()
-
-        # stp 5: Save token linked to User document
-        new_verification_token = EmailVerification(
-            user_id=new_user,
-            token_hash=hashed_token,
-            expires_at=now + timedelta(minutes=15),
-            created_at=now
-        )
-        await new_verification_token.insert(session=session)
-
-        # stp 6: Dispatch verification email (outside transaction)
-        try:
-            link = f"{settings.BACKEND_URL}/api/v1/auth/verify-email?token={plain_token}"
-            subject, body = email_templates.verify_email(data.email, link)
-            util.mail_service(subject, body, data.email, 9)
-            logger.info("Verification email sent", extra={"email": data.email})
-            posthog.capture(distinct_id=data.email, event="user_registered", properties={"email": data.email})
-        except Exception as mail_err:
-            logger.exception("Failed to send verification email", extra={"email": data.email})
-
-        return JSONResponse(
-            status_code=201,
-            content={
-                "success": True,
-                "message": "Account created. Please verify your email.",
-                "data": None,
-                "error": None
-            }
-        )
-    except HTTPException:
-        raise
-    except Exception as exc:
-        logger.exception("Failed to create user", exc_info=exc)
-        raise HTTPException(status_code=500, detail="Could not create user")
+        uid = decoded_token.get("uid")
+        email = decoded_token.get("email")
+        
+        if not email:
+            raise HTTPException(status_code=401, detail="Email not available")
 
 
-@auth_router.get("/verify-email")
-async def verify_mail(
-    token: str,
-    session=Depends(get_tx_session),
-    _= Depends(rate_limiter(max_tokens=30, refill_rate=1, mode="ip"))
-):
-    try:
-            # stp 1: Hash the token
-            hashed_token = hashlib.sha256(token.encode()).hexdigest()
-            now = auth_util.get_now_utc()
 
-            # stp 2: Find active verification token
-            verification = await EmailVerification.find_one(
-                EmailVerification.token_hash == hashed_token,
-                EmailVerification.status == EmailVerificationStatus.ACTIVE,
-                session=session,
-            )
+        print(f"email : {email}")
 
-            if not verification:
-                logger.warning("Invalid or already used verification token")
-                raise HTTPException(status_code=400, detail="Invalid or expired verification link")
+        # check email patteren
+        pattern = r"^[0-9]{2}[a-zA-Z]+[0-9]{3}\.[a-zA-Z]+@giet\.edu$"
+        if not re.fullmatch(pattern, email):
+            logger.warning(f"in valid email for registration {email}")
+            raise HTTPException(status_code=422, detail="Email must be a valid GIET email address ")
 
-            # Step 3: Check token expiration
-            if now > util.ensure_aware(verification.expires_at):
-                await verification.set(
-                    {
-                        EmailVerification.status: EmailVerificationStatus.EXPIRED,
-                    },
-                    session=session,
+        #check in the db
+        stmt = select(User).where(User.email == email)
+        user = (await db.execute(stmt)).scalar_one_or_none()
+
+        if user:
+
+            if not user.is_verified:
+                return JSONResponse(
+                    status_code=401,
+                    content={
+                        "success": False,
+                        "message": "Account not verified",
+                        "data": None,
+                        "error": "ACCOUNT_NOT_VEREFIED"
+                    }
                 )
 
-                logger.warning("Verification token expired")
-                raise HTTPException(status_code=400, detail="Invalid or expired verification link")
+            if user.status != UserStatus.ACTIVE:
+                print("user still pending")
+                return JSONResponse(
+                    status_code=401,
+                    content={
+                        "success": False,
+                        "message": "Account is blocked",
+                        "data": None,
+                        "error": "ACCOUNT_SUSPENDED"
+                    }
+                )
 
-            # stp 4: Mark verification token as USED
-            await verification.set(
-                {
-                    EmailVerification.status: EmailVerificationStatus.USED,
-                    EmailVerification.used_at: now,
-                },
-                session=session,
+
+            stmt_history = select(LoginHistory).where(LoginHistory.user_id == user.id).order_by(desc(LoginHistory.login_at)).limit(10)
+            login_history = (await db.execute(stmt_history)).scalars().all()
+
+            history_dicts = [{"ip_address": h.ip_address, "country": h.country, "user_agent": h.user_agent, "login_at": h.login_at} for h in login_history]
+            
+            risk = auth_util.calculate_risk(client, history_dicts)
+            
+            new_history = LoginHistory(
+                user_id=user.id,
+                ip_address=client["ip"],
+                user_agent=client["user_agent"],
+                country=client["country"],
+                risk_score=risk,
+                login_at=now
             )
+            db.add(new_history)
+            
+            if risk >= 100:
+                user.status = UserStatus.SUSPENDED
+                await db.commit()  
+                return JSONResponse(
+                    status_code=403,
+                    content={
+                        "success": False,
+                        "message": "Risk too high. Blocked for security.",
+                        "data": None,
+                        "error": "HIGH_RISK_DETECTED"
+                    }
+                )
 
-            # stp 5: Verify user
-            user = await User.find_one(
-                User.id == verification.user_id.ref.id,
-                session=session,
+            user.last_login = now
+
+            jti = str(uuid.uuid4())
+            fingerprint = auth_util.generate_fingerprint(client["ip"], client["user_agent"])
+            
+            access_token = security.create_access_token(
+                str(user.id), 
+                user.role.value, 
+                user.status.value, 
+                jti, 
+                fingerprint, 
+                user.token_version
             )
+            refresh_token = security.create_refresh_token(str(user.id))
 
-            if not user:
-                logger.error("User associated with verification token not found",extra={"user_id": str(verification.user_id.ref.id)})
-                raise HTTPException(status_code=500, detail="Associated user not found")
-
-            await user.set(
-                {
-                    User.is_verify: True,
-                    User.updated_at: now,
-                    User.status: UserStatus.ACTIVE
-                },
-                session=session,
+            new_refresh = RefreshToken(
+                user_id=user.id,
+                token_hash=auth_util.hash_password(refresh_token),
+                expires_at=now + timedelta(days=7),
+                ip_address=client["ip"],
+                user_agent=client["user_agent"],
+                revoked=False
             )
+            db.add(new_refresh)
 
-            # stp 6: Success
-            logger.info("User email verified",extra={"user_id": str(user.id)})
+            await db.flush()
+            await db.commit()
 
-            return JSONResponse(
-                status_code=200,
-                content={
-                    "success": True,
-                    "message": "Account verified successfully",
-                    "data": None,
-                    "error": None,
-                },
-            )
-
-    except HTTPException as httpe:
-        raise httpe
-    except Exception as e:
-        logger.exception("Error during email verification", extra={"error": str(e)})
-        raise HTTPException(status_code=500,detail="Internal Server Error")
+            logger.info("Login DB commit successful", extra={"user_id": str(user.id)})
 
 
-@auth_router.post("/resend-verification")
-async def resend_verification(
-    data: ResendVerification,
-    session=Depends(get_tx_session),
-    _=Depends(rate_limiter(max_tokens=3, refill_rate=0.05, mode="login"))
-):
-    try:
-        # stp 1: Find user by email
-        user = await User.find_one(User.email == data.email)
+            response = JSONResponse(
+                        status_code=200, 
+                        content={
+                            "success": True,
+                            "message": "Logged in successfully",
+                            "data": None,
+                            "errors": None
+                        }
+                    )
+            
+            cookie_params = {
+                "httponly": True,
+                "secure": settings.COOKIE_SECURE,
+                "samesite": settings.COOKIE_SAMESITE,
+                "path": "/"
+            }
 
-        # stp 2: Validate user existence and verification status
-        if not user:
-            logger.warning("Resend verification failed: Email not registered", extra={"email": data.email})
-            raise HTTPException(status_code=404, detail="Email not registered")
+            response.set_cookie(settings.REFRESH_TOKEN_COOKIE_NAME, refresh_token, max_age=7 * 24 * 3600, **cookie_params)
+            response.set_cookie(settings.ACCESS_TOKEN_COOKIE_NAME, access_token, max_age=15 * 60, **cookie_params)
+            
+            return response
 
-        if user.is_verify:
-            logger.warning("Resend verification failed: Email already verified", extra={"email": data.email})
-            raise HTTPException(status_code=400, detail="Email already verified")
+#===========================================================
+        #else:
 
-        now = auth_util.get_now_utc()
-
-        # stp 3: expire any active verification tokens
-        active_verifications = await EmailVerification.find(
-            EmailVerification.user_id.id == user.id,
-            EmailVerification.status == EmailVerificationStatus.ACTIVE,
-            session=session
-        ).to_list()
-        for verification in active_verifications:
-            await verification.set({EmailVerification.status: EmailVerificationStatus.EXPIRED}, session=session)
-
-        # stp 3: generate new verification token
-        plain_token = secrets.token_urlsafe(32)
-        hashed_token = hashlib.sha256(plain_token.encode()).hexdigest()
-
-        new_verification_token = EmailVerification(
-            user_id=user,
-            token_hash=hashed_token,
-            expires_at=now + timedelta(minutes=15),
+        new_user = User(
+            email=email,
+            google_uid=uid,
+            role=UserRole.STUDENT,
+            is_verified=True,
+            status=UserStatus.ACTIVE,
             created_at=now
         )
-        await new_verification_token.insert(session=session)
 
-        # stp 5: dispatch new email varification
-        try:
-            link = f"{settings.FRONTEND_URL}/api/v1/auth/verify-email?token={plain_token}"
-            subject, body = email_templates.verify_email(user.email, link)
-            util.mail_service(subject, body, user.email, 9)
-            logger.info("Resent verification email sent", extra={"email": user.email})
-        except Exception as mail_err:
-            logger.exception("Failed to resend verification email", extra={"email": user.email})
+        db.add(new_user)
 
-        # stp 6: success response
-        return JSONResponse(
-            status_code=200,
-            content={
-                "success": True,
-                "message": "Verification link has been sent to your email",
-                "data": None,
-                "error": None
-            }
+        await db.flush()
+        await db.refresh(new_user)
+
+        # hit giet api and verify 1st then add the data to profile table for now bwlo is the demo data
+
+        new_profile = Profile(
+            user_id = new_user.id,
+            roll_no="24CSEAIML114",
+            contact_no="78921435582",
+            name="sir ijack newton",
+            semester=4,
+            academic_session="2025-2029",
+            created_at=now
+        )
+        db.add(new_profile)
+
+        # send an welcome mail with instruction of app
+
+
+        jti = str(uuid.uuid4())
+        new_history = LoginHistory(
+            user_id=new_user.id,
+            ip_address=client["ip"],
+            user_agent=client["user_agent"],
+            country=client["country"],
+            risk_score=0,
+            login_at=now
+        )
+        db.add(new_history)
+
+        fingerprint = auth_util.generate_fingerprint(client["ip"], client["user_agent"])
+
+        access_token = security.create_access_token(
+            str(new_user.id), 
+            UserRole.STUDENT, 
+            UserStatus.ACTIVE, 
+            jti, 
+            fingerprint, 
+            new_user.token_version
         )
 
-    except HTTPException:
-        raise
-    except Exception as exc:
-        logger.exception("Failed to resend verification link", exc_info=exc)
-        raise HTTPException(status_code=500, detail="Could not resend verification link")
+        refresh_token = security.create_refresh_token(str(new_user.id))
+
+        new_refresh = RefreshToken(
+            user_id=new_user.id,
+            token_hash=auth_util.hash_password(refresh_token),
+            expires_at=now + timedelta(days=7),
+            ip_address=client["ip"],
+            user_agent=client["user_agent"],
+            revoked=False
+        )
+        db.add(new_refresh)
+
+        await db.commit()
+        logger.info("Signup db initialization is complete", extra={"email": email})
+
+        response = JSONResponse(
+                    status_code=200, 
+                    content={
+                        "success": True,
+                        "message": "Logged in successfully",
+                        "data": None,
+                        "errors": None
+                    }
+                )
+        
+        cookie_params = {
+            "httponly": True,
+            "secure": settings.COOKIE_SECURE,
+            "samesite": settings.COOKIE_SAMESITE,
+            "path": "/"
+        }
+
+        response.set_cookie(settings.REFRESH_TOKEN_COOKIE_NAME, refresh_token, max_age=7 * 24 * 3600, **cookie_params)
+        response.set_cookie(settings.ACCESS_TOKEN_COOKIE_NAME, access_token, max_age=15 * 60, **cookie_params)
+        
+        return response
+
+    except HTTPException as httpe:
+        await db.rollback()
+        raise httpe
+    except Exception as e:
+        await db.rollback()
+        print(f"ERROR : {str(e)}")
+        logger.exception(
+            "google login or sign up failed",
+            extra={"error_type": type(e).__name__, "error_detail": str(e)}
+        )
+
+        raise HTTPException(status_code=500, detail=f"Internal Server Error")
 
 
-
+# ==============================================================================================================================
 
 @auth_router.post(
-    "/login", 
+    "/admin-login", 
     dependencies=[Depends(rate_limiter(max_tokens=5, refill_rate=0.1, mode="login"))]
 )
 async def login(
     request: Request,
     data: UserLogin, 
-    client=Depends(security.get_client_info)
+    client=Depends(security.get_client_info),
+    session: AsyncSession = Depends(get_db)
 ):
+    pass
+    # verify_user = await verify_turnstile(request, data)
+    # if not verify_user:
+    #     raise HTTPException(status_code=403, detail="Bot Detected")
 
-    verify_user = await verify_turnstile(request, data)
-    if not verify_user:
-        raise HTTPException(status_code=403, detail="Bot Detected")
-
-    user = await User.find_one(User.email == data.identifier)
+    # stmt = select(User).where(User.email == data.identifier)
+    # user = (await session.execute(stmt)).scalar_one_or_none()
     
-
-    DUMMY_HASH = "$2b$12$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36XVyXm5WjjHyuBxmIdF4Ku"
-    target_hash = user.password_hash if user else DUMMY_HASH
-    password_is_correct = auth_util.verify_password(data.password, target_hash)
+    # DUMMY_HASH = "$2b$12$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36XVyXm5WjjHyuBxmIdF4Ku"
+    # target_hash = user.password_hash if user else DUMMY_HASH
+    # password_is_correct = auth_util.verify_password(data.password, target_hash)
     
+    # if not user or not password_is_correct:
+    #     print(f"invalid details {data.identifier} || {data.password}")
+    #     posthog.capture(distinct_id=data.identifier, event="user_login_failed", properties={"reason": "invalid_credentials"})
+    #     return JSONResponse(
+    #         status_code=401,
+    #         content={
+    #             "success": False,
+    #             "message": "Invalid credentials",
+    #             "data": None,
+    #             "error": "INVALID_CREDENTIALS"
+    #         }
+    #     )
 
-    if not user or not password_is_correct:
-        print(f"uinvalid details {data.identifier} || {data.password}")
-        posthog.capture(distinct_id=data.identifier, event="user_login_failed", properties={"reason": "invalid_credentials"})
-        return JSONResponse(
-            status_code=401,
-            content={
-                "success": False,
-                "message": "Invalid credentials",
-                "data": None,
-                "error": "INVALID_CREDENTIALS"
-            }
-        )
+    # if user.status == UserStatus.INACTIVE:
+    #     print("user still pending")
+    #     return JSONResponse(
+    #         status_code=401,
+    #         content={
+    #             "success": False,
+    #             "message": "Account not verified",
+    #             "data": None,
+    #             "error": "ACCOUNT_NOT_VERIFIED"
+    #         }
+    #     )
 
-    if user.status == UserStatus.PENDING:
-        print("user still pending")
-        return JSONResponse(
-            status_code=401,
-            content={
-                "success": False,
-                "message": "Account not verified",
-                "data": None,
-                "error": "ACCOUNT_NOT_VERIFIED"
-            }
-        )
+    # if user.status != UserStatus.ACTIVE:
+    #     raise HTTPException(
+    #         status_code=403,
+    #         detail="Account is blocked"
+    #     )
 
+    # if not user.is_verified:
+    #     raise HTTPException(
+    #         status_code=401,
+    #         detail="Account is not verified"
+    #     )
 
-    if user.status != UserStatus.ACTIVE:
-        raise HTTPException(
-            status_code=403,
-            detail="Account is blocked"
-        )
+    # stmt_history = select(LoginHistory).where(LoginHistory.user_id == user.id).order_by(desc(LoginHistory.login_at)).limit(10)
+    # login_history = (await session.execute(stmt_history)).scalars().all()
 
-    if not user.is_verify:
-        raise HTTPException(
-            status_code=401,
-            detail="Account is not verified"
-        )
-
-
-    login_history = await LoginHistory.find(LoginHistory.user_id == user.id).sort(-LoginHistory.login_at).limit(10).to_list()
-
-    history_dicts = [{"ip_address": h.ip_address, "country": h.country, "user_agent": h.user_agent, "login_at": h.login_at} for h in login_history]
+    # history_dicts = [{"ip_address": h.ip_address, "country": h.country, "user_agent": h.user_agent, "login_at": h.login_at} for h in login_history]
     
-    risk = auth_util.calculate_risk(client, history_dicts)
+    # risk = auth_util.calculate_risk(client, history_dicts)
     
-    try:
-
-        new_history = LoginHistory(
-            user_id=user.id,
-            ip_address=client["ip"],
-            user_agent=client["user_agent"],
-            country=client["country"],
-            risk_score=risk
-        )
-        await new_history.insert()
+    # try:
+    #     now = auth_util.get_now_utc()
+    #     new_history = LoginHistory(
+    #         user_id=user.id,
+    #         ip_address=client["ip"],
+    #         user_agent=client["user_agent"],
+    #         country=client["country"],
+    #         risk_score=risk,
+    #         login_at=now
+    #     )
+    #     session.add(new_history)
         
+    #     if risk >= 100:
+    #         await session.commit()  
+    #         return JSONResponse(
+    #             status_code=403,
+    #             content={
+    #                 "success": False,
+    #                 "message": "Risk too high. Blocked for security.",
+    #                 "data": None,
+    #                 "error": "HIGH_RISK_DETECTED"
+    #             }
+    #         )
 
-        if risk >= 100:
-            return JSONResponse(
-                status_code=403,
-                content={
-                    "success": False,
-                    "message": "Risk too high. Blocked for security.",
-                    "data": None,
-                    "error": "HIGH_RISK_DETECTED"
-                }
-            )
+    #     user.last_login = now
 
-
-        user.last_login = auth_util.get_now_utc()
-        await user.save()
-
-
-        jti = str(uuid.uuid4())
-        fingerprint = auth_util.generate_fingerprint(client["ip"], client["user_agent"])
+    #     jti = str(uuid.uuid4())
+    #     fingerprint = auth_util.generate_fingerprint(client["ip"], client["user_agent"])
         
-        access_token = security.create_access_token(
-            str(user.id), user.role.value if hasattr(user.role, 'value') else user.role, user.status.value if hasattr(user.status, 'value') else user.status, jti, fingerprint, user.token_version
-        )
-        refresh_token = security.create_refresh_token(str(user.id))
+    #     access_token = security.create_access_token(
+    #         str(user.id), 
+    #         user.role.value, 
+    #         user.status.value, 
+    #         jti, 
+    #         fingerprint, 
+    #         user.token_version
+    #     )
+    #     refresh_token = security.create_refresh_token(str(user.id))
 
+    #     new_refresh = RefreshToken(
+    #         user_id=user.id,
+    #         token_hash=auth_util.hash_password(refresh_token),
+    #         expires_at=now + timedelta(days=7),
+    #         ip_address=client["ip"],
+    #         user_agent=client["user_agent"],
+    #         revoked=False
+    #     )
+    #     session.add(new_refresh)
+    #     await session.flush()
 
-        new_refresh = RefreshToken(
-            user_id=user.id,
-            token_hash=auth_util.hash_password(refresh_token),
-            expires_at=auth_util.get_now_utc() + timedelta(days=7),
-            ip_address=client["ip"],
-            user_agent=client["user_agent"]
-        )
-        await new_refresh.insert()
+    #     # commit all login DB writes
+    #     await session.commit()
+    #     logger.info("Login DB commit successful", extra={"user_id": str(user.id)})
 
-    except Exception as e:
+    # except Exception as e:
+    #     await session.rollback()
+    #     logger.exception("Database error during login", exc_info=e)
+    #     raise HTTPException(status_code=500, detail="Database error during login")
 
-        raise HTTPException(status_code=500, detail="Database error during login")
+    # posthog.capture(distinct_id=data.identifier, event="user_logged_in", properties={"role": user.role.value})
 
-    posthog.capture(distinct_id=data.identifier, event="user_logged_in", properties={"role": user.role.value if hasattr(user.role, 'value') else user.role})
-
-    response = JSONResponse(
-        status_code=200, 
-        content={
-            "success": True,
-            "message": "Logged in successfully",
-            "data": {"role": user.role.value if hasattr(user.role, 'value') else user.role},
-            "errors": None
-        }
-    )
+    # response = JSONResponse(
+    #     status_code=200, 
+    #     content={
+    #         "success": True,
+    #         "message": "Logged in successfully",
+    #         "data": {"role": user.role.value},
+    #         "errors": None
+    #     }
+    # )
     
-    cookie_params = {
-        "httponly": True,
-        "secure": settings.COOKIE_SECURE,
-        "samesite": settings.COOKIE_SAMESITE,
-        "path": "/"
-    }
+    # cookie_params = {
+    #     "httponly": True,
+    #     "secure": settings.COOKIE_SECURE,
+    #     "samesite": settings.COOKIE_SAMESITE,
+    #     "path": "/"
+    # }
 
-    response.set_cookie(settings.REFRESH_TOKEN_COOKIE_NAME, refresh_token, max_age=7 * 24 * 3600, **cookie_params)
-    response.set_cookie(settings.ACCESS_TOKEN_COOKIE_NAME, access_token, max_age=15 * 60, **cookie_params)
+    # response.set_cookie(settings.REFRESH_TOKEN_COOKIE_NAME, refresh_token, max_age=7 * 24 * 3600, **cookie_params)
+    # response.set_cookie(settings.ACCESS_TOKEN_COOKIE_NAME, access_token, max_age=15 * 60, **cookie_params)
     
-    return response
+    # return response
 
+# ==============================================================================================================================
 
 @auth_router.post(
     "/refresh",
     dependencies=[Depends(rate_limiter(max_tokens=10, refill_rate=1.0, mode="ip"))]
 )
-async def refresh_token(request: Request, response: Response):
+async def refresh_token(
+    request: Request, 
+    response: Response,
+    session: AsyncSession = Depends(get_db)
+):
 
     refresh_token_cookie = request.cookies.get(settings.REFRESH_TOKEN_COOKIE_NAME)
     if not refresh_token_cookie:
@@ -489,67 +543,94 @@ async def refresh_token(request: Request, response: Response):
             security.SECRET_KEY, 
             algorithms=[security.ALGORITHM]
         )
-        user_id = str(payload.get("user_id"))
+        user_id = int(payload.get("user_id"))
     except Exception:
         raise HTTPException(status_code=401, detail="Invalid refresh session")
 
-    all_tokens = await RefreshToken.find(RefreshToken.user_id == ObjectId(user_id)).to_list()
-    
-    matching_token = next((t for t in all_tokens if auth_util.verify_password(refresh_token_cookie, t.token_hash)), None)
-            
-    if not matching_token:
-        raise HTTPException(status_code=401, detail="Session not found")
+    try:
+        stmt = select(RefreshToken).where(RefreshToken.user_id == user_id)
+        all_tokens = (await session.execute(stmt)).scalars().all()
+        
+        matching_token = next((t for t in all_tokens if auth_util.verify_password(refresh_token_cookie, t.token_hash)), None)
+                
+        if not matching_token:
+            raise HTTPException(status_code=401, detail="Session not found")
 
-    if matching_token.revoked:
-        await RefreshToken.find(RefreshToken.user_id == ObjectId(user_id)).update({"$set": {"revoked": True}})
-        raise HTTPException(status_code=403, detail="Security breach detected. All sessions revoked.")
+        if matching_token.revoked:
+            # Security breach: revoke all sessions then rollback not needed — this is intentional
+            await session.execute(update(RefreshToken).where(RefreshToken.user_id == user_id).values(revoked=True))
+            await session.commit()
+            raise HTTPException(status_code=403, detail="Security breach detected. All sessions revoked.")
 
+        stmt_history = select(LoginHistory).where(LoginHistory.user_id == user_id).order_by(asc(LoginHistory.login_at))
+        user_history = (await session.execute(stmt_history)).scalars().all()
+        history_dicts = [{"ip_address": h.ip_address, "country": h.country, "user_agent": h.user_agent, "login_at": h.login_at} for h in user_history]
 
-    user_history = await LoginHistory.find(LoginHistory.user_id == ObjectId(user_id)).sort(+LoginHistory.login_at).to_list()
-    history_dicts = [{"ip_address": h.ip_address, "country": h.country, "user_agent": h.user_agent, "login_at": h.login_at} for h in user_history]
+        client = await security.get_client_info(request)
+        risk = auth_util.calculate_risk_refresh(client, history_dicts) 
+        
+        if risk >= 100:
+            await session.execute(update(RefreshToken).where(RefreshToken.user_id == user_id).values(revoked=True))
+            await session.commit()
+            raise HTTPException(status_code=403, detail="Risk anomaly detected. Please log in again.")
 
+        stmt_user = select(User).where(User.id == user_id)
+        user = (await session.execute(stmt_user)).scalar_one_or_none()
+        
+        if not user or user.status != UserStatus.ACTIVE:
+            raise HTTPException(status_code=403, detail="Account restricted")
 
-    client = await security.get_client_info(request)
-    risk = auth_util.calculate_risk_refresh(client, history_dicts) 
-    
-    if risk >= 100:
-        await RefreshToken.find(RefreshToken.user_id == ObjectId(user_id)).update({"$set": {"revoked": True}})
-        raise HTTPException(status_code=403, detail="Risk anomaly detected. Please log in again.")
+        # Rotate: revoke old token, issue new tokens
+        matching_token.revoked = True
+        
+        new_jti = str(uuid.uuid4())
+        fingerprint = auth_util.generate_fingerprint(client["ip"], client["user_agent"])
+        
+        new_access_token = security.create_access_token(
+            str(user.id), 
+            user.role.value, 
+            user.status.value, 
+            new_jti, 
+            fingerprint, 
+            user.token_version
+        )
+        new_refresh_token = security.create_refresh_token(str(user.id))
+        
+        now = auth_util.get_now_utc()
 
+        new_refresh_obj = RefreshToken(
+            user_id=user.id,
+            token_hash=auth_util.hash_password(new_refresh_token),
+            expires_at=now + timedelta(days=7),
+            ip_address=client["ip"],
+            user_agent=client["user_agent"],
+            revoked=False
+        )
+        session.add(new_refresh_obj)
+        
+        new_history = LoginHistory(
+            user_id=user.id,
+            ip_address=client["ip"],
+            user_agent=client["user_agent"],
+            country=client.get("country"),
+            risk_score=risk,
+            login_at=now
+        )
+        session.add(new_history)
 
-    user = await User.get(ObjectId(user_id) if isinstance(user_id, str) and len(user_id) == 24 else user_id)
-    
-    if not user or user.status != UserStatus.ACTIVE:
-        raise HTTPException(status_code=403, detail="Account restricted")
+        await session.flush()
 
-    matching_token.revoked = True
-    await matching_token.save()
-    
-    new_jti = str(uuid.uuid4())
-    fingerprint = auth_util.generate_fingerprint(client["ip"], client["user_agent"])
-    
-    new_access_token = security.create_access_token(
-        str(user.id), user.role.value if hasattr(user.role, 'value') else user.role, user.status.value if hasattr(user.status, 'value') else user.status, new_jti, fingerprint, user.token_version
-    )
-    new_refresh_token = security.create_refresh_token(str(user.id))
-    
+        # commit all refresh writes
+        await session.commit()
+        logger.info("Refresh DB commit successful", extra={"user_id": str(user.id)})
 
-    await RefreshToken(
-        user_id=user.id,
-        token_hash=auth_util.hash_password(new_refresh_token),
-        expires_at=auth_util.get_now_utc() + timedelta(days=7),
-        ip_address=client["ip"],
-        user_agent=client["user_agent"]
-    ).insert()
-    
-    await LoginHistory(
-        user_id=user.id,
-        ip_address=client["ip"],
-        user_agent=client["user_agent"],
-        country=client.get("country"),
-        risk_score=risk
-    ).insert()
-
+    except HTTPException:
+        await session.rollback()
+        raise
+    except Exception as e:
+        await session.rollback()
+        logger.exception("Database error during token refresh", exc_info=e)
+        raise HTTPException(status_code=500, detail="Database error during token refresh")
 
     response_obj = JSONResponse(content={"success": True, "message": "Session rotated"})
     
@@ -571,41 +652,51 @@ async def logout(
     request: Request,
     response: Response,
     super_logout: bool = False,
-    user_data: dict = Depends(security.token_required(allowed_roles=[r.value for r in UserRole]))
+    user_data: dict = Depends(security.token_required(allowed_roles=[r.value for r in UserRole])),
+    session: AsyncSession = Depends(get_db)
 ):
-    # 1. Blacklist the current Access Token JTI
-    new_blacklist = TokenBlacklist(
-        jti=user_data.get("jti"),
-        expires_at=auth_util.get_now_utc() + timedelta(minutes=15)
-    )
-    await new_blacklist.insert()
+    try:
+        # stp 1: Blacklist the current Access Token JTI
+        new_blacklist = TokenBlacklist(
+            jti=user_data.get("jti"),
+            expires_at=auth_util.get_now_utc() + timedelta(minutes=15)
+        )
+        session.add(new_blacklist)
 
-    user_id_str = str(user_data.get("user_id"))
-    posthog.capture(distinct_id=user_id_str, event="user_logged_out", properties={"super_logout": super_logout})
+        user_id = int(user_data.get("user_id"))
+        posthog.capture(distinct_id=str(user_id), event="user_logged_out", properties={"super_logout": super_logout})
 
-    if super_logout:
-        # Revoke all refresh tokens for this user
-        await RefreshToken.find(RefreshToken.user_id == user_id_str).update({"$set": {"revoked": True}})
-        
-        # Increment token_version to invalidate all existing access tokens across all devices
-        user = await User.get(ObjectId(user_id_str) if isinstance(user_id_str, str) and len(user_id_str) == 24 else user_id_str)
-        if user:
-            user.token_version += 1
-            await user.save()
-    else:
-        # Revoke the current refresh token from the cookie
-        refresh_token_cookie = request.cookies.get(settings.REFRESH_TOKEN_COOKIE_NAME)
-        if refresh_token_cookie:
-            # We must find the refresh token that matches the hash
-            all_tokens = await RefreshToken.find(
-                RefreshToken.user_id == user_id_str,
-                RefreshToken.revoked == False
-            ).to_list()
+        if super_logout:
+            # Revoke all refresh tokens for this user
+            await session.execute(update(RefreshToken).where(RefreshToken.user_id == user_id).values(revoked=True))
             
-            matching_token = next((t for t in all_tokens if auth_util.verify_password(refresh_token_cookie, t.token_hash)), None)
-            if matching_token:
-                matching_token.revoked = True
-                await matching_token.save()
+            # Increment token_version to invalidate all existing access tokens across all devices
+            stmt_user = select(User).where(User.id == user_id)
+            user = (await session.execute(stmt_user)).scalar_one_or_none()
+            if user:
+                user.token_version += 1
+        else:
+            # Revoke only the current refresh token from the cookie
+            refresh_token_cookie = request.cookies.get(settings.REFRESH_TOKEN_COOKIE_NAME)
+            if refresh_token_cookie:
+                stmt = select(RefreshToken).where(RefreshToken.user_id == user_id, RefreshToken.revoked == False)
+                all_tokens = (await session.execute(stmt)).scalars().all()
+                
+                matching_token = next((t for t in all_tokens if auth_util.verify_password(refresh_token_cookie, t.token_hash)), None)
+                if matching_token:
+                    matching_token.revoked = True
+
+        await session.flush()
+        await session.commit()
+        logger.info("Logout DB commit successful", extra={"user_id": str(user_id), "super_logout": super_logout})
+
+    except HTTPException:
+        await session.rollback()
+        raise
+    except Exception as e:
+        await session.rollback()
+        logger.exception("Database error during logout", exc_info=e)
+        raise HTTPException(status_code=500, detail="Database error during logout")
 
     # Clear Cookies
     response_obj = JSONResponse(
@@ -635,14 +726,13 @@ async def logout(
 
 @auth_router.get("/sessions")
 async def list_sessions(
-    user_data: dict = Depends(security.token_required(allowed_roles=[r.value for r in UserRole]))
+    user_data: dict = Depends(security.token_required(allowed_roles=[r.value for r in UserRole])),
+    session: AsyncSession = Depends(get_db)
 ):
     """List active sessions (refresh tokens) for the current user."""
-    user_id_str = str(user_data.get("user_id"))
-    sessions = await RefreshToken.find(
-        RefreshToken.user_id == user_id_str,
-        RefreshToken.revoked == False
-    ).to_list()
+    user_id = int(user_data.get("user_id"))
+    stmt = select(RefreshToken).where(RefreshToken.user_id == user_id, RefreshToken.revoked == False)
+    sessions = (await session.execute(stmt)).scalars().all()
     
     return {
         "success": True,
@@ -652,19 +742,30 @@ async def list_sessions(
 
 @auth_router.delete("/sessions/{session_id}")
 async def revoke_session(
-    session_id: str,
-    user_data: dict = Depends(security.token_required(allowed_roles=[r.value for r in UserRole]))
+    session_id: int,
+    user_data: dict = Depends(security.token_required(allowed_roles=[r.value for r in UserRole])),
+    session: AsyncSession = Depends(get_db)
 ):
     """Revoke a specific session."""
     try:
-        session = await RefreshToken.get(ObjectId(session_id) if isinstance(session_id, str) and len(session_id) == 24 else session_id)
-        if not session or session.user_id != str(user_data.get("user_id")):
+        stmt = select(RefreshToken).where(RefreshToken.id == session_id)
+        session_obj = (await session.execute(stmt)).scalar_one_or_none()
+
+        if not session_obj or session_obj.user_id != int(user_data.get("user_id")):
             raise HTTPException(status_code=404, detail="Session not found")
 
-        session.revoked = True
-        await session.save()
-    except Exception:
-        raise HTTPException(status_code=404, detail="Session not found")
+        session_obj.revoked = True
+        await session.flush()
+        await session.commit()
+        logger.info("Session revoked", extra={"session_id": session_id})
+
+    except HTTPException:
+        await session.rollback()
+        raise
+    except Exception as e:
+        await session.rollback()
+        logger.exception("Database error during session revocation", exc_info=e)
+        raise HTTPException(status_code=500, detail="Could not revoke session")
 
     return {
         "success": True,

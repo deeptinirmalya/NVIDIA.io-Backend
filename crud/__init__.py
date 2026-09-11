@@ -1,8 +1,5 @@
-"""
-CRUD operations for database access layer.
-"""
-from crud.registration_crud import RegistrationCRUD
-from crud.team_crud import TeamCRUD
-from crud.payment_crud import PaymentCRUD
 
-__all__ = ["RegistrationCRUD", "TeamCRUD", "PaymentCRUD"]
+from crud.single_registration_crud import SingleregistrationCrudService
+from crud.payment_crud import PaymentCrudServices
+
+__all__ = ["SingleregistrationCrudService", "PaymentCrudServices"]

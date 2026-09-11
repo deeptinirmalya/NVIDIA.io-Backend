@@ -2,12 +2,10 @@ from datetime import datetime
 from enum import Enum as PyEnum
 
 from sqlalchemy import (
-    Boolean,
     DateTime,
     Enum,
     ForeignKey,
     Index,
-    UniqueConstraint,
 )
 from sqlalchemy.dialects.mysql import BIGINT
 from sqlalchemy.orm import Mapped, mapped_column
@@ -15,23 +13,28 @@ from sqlalchemy.orm import Mapped, mapped_column
 from db.models.base import Base
 
 
-class TeamMemberRole(str, PyEnum):
-    MEMBER = "MEMBER"
-    CAPTAIN = "CAPTAIN"
+class SingleRegistrationStatus(str, PyEnum):
+    PENDING = "PENDING"
+    CONFIRMED = "CONFIRMED"
+    CANCELLED = "CANCELLED"
 
 
-class TeamMember(Base):
-    __tablename__ = "team_members"
+class SingleRegistrationPaymentStatus(str, PyEnum):
+    NOT_REQUIRED = "NOT_REQUIRED"
+    PENDING = "PENDING"
+    PAID = "PAID"
+    FAILED = "FAILED"
+    REFUNDED = "REFUNDED"
+
+
+class SingleRegistration(Base):
+    __tablename__ = "single_registrations"
 
     __table_args__ = (
-        UniqueConstraint(
-            "team_registration_id",
-            "user_id",
-            name="uq_team_member_registration_user",
-        ),
         Index(
-            "idx_team_member_user",
-            "user_id",
+            "idx_single_registration_event_status",
+            "event_id",
+            "status",
         ),
     )
 
@@ -41,21 +44,11 @@ class TeamMember(Base):
         autoincrement=True,
     )
 
-    team_registration_id: Mapped[int] = mapped_column(
-        BIGINT(unsigned=True),
-        ForeignKey(
-            "team_registrations.id",
-            ondelete="CASCADE",
-            name="fk_team_member_registration",
-        ),
-        nullable=False,
-    )
-
     user_id: Mapped[int] = mapped_column(
         BIGINT(unsigned=True),
         ForeignKey(
             "users.id",
-            name="fk_team_member_user",
+            ondelete="RESTRICT",
         ),
         nullable=False,
     )
@@ -65,21 +58,23 @@ class TeamMember(Base):
         ForeignKey(
             "events.id",
             ondelete="RESTRICT",
-            name="fk_team_registration_event",
         ),
         nullable=False,
     )
 
-    role: Mapped[TeamMemberRole] = mapped_column(
-        Enum(TeamMemberRole, name="team_member_role_enum"),
+    status: Mapped[SingleRegistrationStatus] = mapped_column(
+        Enum(SingleRegistrationStatus, name="single_registration_status_enum"),
         nullable=False,
-        default=TeamMemberRole.MEMBER,
+        default=SingleRegistrationStatus.PENDING,
     )
 
-    is_removed: Mapped[bool] = mapped_column(
-        Boolean,
+    payment_status: Mapped[SingleRegistrationPaymentStatus] = mapped_column(
+        Enum(
+            SingleRegistrationPaymentStatus,
+            name="single_registration_payment_status_enum",
+        ),
         nullable=False,
-        default=False,
+        default=SingleRegistrationPaymentStatus.NOT_REQUIRED,
     )
 
     created_at: Mapped[datetime] = mapped_column(

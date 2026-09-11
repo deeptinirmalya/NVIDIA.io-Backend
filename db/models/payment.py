@@ -1,14 +1,28 @@
 from datetime import datetime
-from decimal import Decimal
-from enum import Enum
+from enum import Enum as PyEnum
 
-from beanie import Document, PydanticObjectId
-from bson.decimal128 import Decimal128
-from pydantic import Field, field_validator
-from pymongo import IndexModel, ASCENDING, DESCENDING
+from sqlalchemy import (
+    CheckConstraint,
+    DateTime,
+    Enum,
+    ForeignKey,
+    Index,
+    String,
+    Text,
+    Boolean,
+)
+from sqlalchemy.dialects.mysql import BIGINT
+from sqlalchemy.orm import Mapped, mapped_column
+
+from db.models.base import Base
 
 
-class PaymentStatus(str, Enum):
+class PaymentParticipationType(str, PyEnum):
+    SINGLE = "SINGLE"
+    TEAM = "TEAM"
+
+
+class PaymentStatus(str, PyEnum):
     CREATED = "CREATED"
     PROCESSING = "PROCESSING"
     SUCCESS = "SUCCESS"
@@ -16,115 +30,147 @@ class PaymentStatus(str, Enum):
     REFUNDED = "REFUNDED"
 
 
-class Payment(Document):
+class Payment(Base):
+    __tablename__ = "payments"
 
-
-    event_id: PydanticObjectId
-
-    registration_id: PydanticObjectId
-
-    user_id: PydanticObjectId
-
-    team_id: PydanticObjectId | None = None
-
-
-
-    amount: Decimal
-
-    currency: str = "INR"
-
-    status: PaymentStatus = PaymentStatus.CREATED
-
-
-    idempotency_key: str
-
-
-    razorpay_order_id: str | None = None
-
-    razorpay_payment_id: str | None = None
-
-    razorpay_signature: str | None = None
-
-    signature_verified: bool = False
-
-
-    failure_reason: str | None = None
-
-    refund_id: str | None = None
-
-    refund_reason: str | None = None
-
-
-    webhook_received: bool = False
-
-    webhook_received_at: datetime | None = None
-
-
-    created_at: datetime = Field(
-        default_factory=datetime.utcnow
+    __table_args__ = (
+        CheckConstraint(
+            "("
+            "participation_type = 'SINGLE' "
+            "AND single_registration_id IS NOT NULL "
+            "AND team_registration_id IS NULL"
+            ") "
+            "OR "
+            "("
+            "participation_type = 'TEAM' "
+            "AND team_registration_id IS NOT NULL "
+            "AND single_registration_id IS NULL"
+            ")",
+            name="check_payment_participation_type",
+        ),
+        CheckConstraint(
+            "("
+            "single_registration_id IS NOT NULL "
+            "AND team_registration_id IS NULL"
+            ") "
+            "OR "
+            "("
+            "single_registration_id IS NULL "
+            "AND team_registration_id IS NOT NULL"
+            ")",
+            name="check_payment_single_or_team",
+        ),
+        Index(
+            "idx_payment_single_reg_status",
+            "single_registration_id",
+            "status",
+        ),
+        Index(
+            "idx_payment_team_reg_status",
+            "team_registration_id",
+            "status",
+        ),
     )
 
-    updated_at: datetime = Field(
-        default_factory=datetime.utcnow
+    id: Mapped[int] = mapped_column(
+        BIGINT(unsigned=True),
+        primary_key=True,
+        autoincrement=True,
     )
 
-    completed_at: datetime | None = None
+    participation_type: Mapped[PaymentParticipationType] = mapped_column(
+        Enum(PaymentParticipationType, name="payment_participation_type_enum"),
+        nullable=False,
+        default=PaymentParticipationType.SINGLE,
+    )
 
-    @field_validator("amount", mode="before")
-    @classmethod
-    def normalize_amount(cls, value):
-        if value is None:
-            return value
-        if isinstance(value, Decimal128):
-            return value.to_decimal()
-        if isinstance(value, (int, float, str, Decimal)):
-            return Decimal(str(value))
-        return value
+    single_registration_id: Mapped[int | None] = mapped_column(
+        BIGINT(unsigned=True),
+        ForeignKey(
+            "single_registrations.id",
+            ondelete="RESTRICT",
+            name="fk_payment_single_registration",
+        ),
+        nullable=True,
+    )
 
-    class Settings:
+    team_registration_id: Mapped[int | None] = mapped_column(
+        BIGINT(unsigned=True),
+        ForeignKey(
+            "team_registrations.id",
+            ondelete="RESTRICT",
+            name="fk_payment_team_registration",
+        ),
+        nullable=True,
+    )
 
-        name = "payments"
+    amount: Mapped[int] = mapped_column(
+        BIGINT(unsigned=True),
+        nullable=False,
+    )
 
-        indexes = [
+    currency: Mapped[str] = mapped_column(
+        String(10),
+        nullable=False,
+        default="INR",
+    )
 
-            IndexModel(
-                [("idempotency_key", ASCENDING)],
-                unique=True
-            ),
+    status: Mapped[PaymentStatus] = mapped_column(
+        Enum(PaymentStatus, name="payment_status_enum"),
+        nullable=False,
+        default=PaymentStatus.CREATED,
+    )
 
-            IndexModel(
-                [("razorpay_order_id", ASCENDING)],
-                unique=True,
-                partialFilterExpression={
-                    "razorpay_order_id": {"$type": "string"}
-                }
-            ),
+    idempotency_key: Mapped[str] = mapped_column(
+        String(100),
+        unique=True,
+        nullable=False,
+    )
 
-            # Razorpay payment lookup
-            IndexModel(
-                [("razorpay_payment_id", ASCENDING)],
-                unique=True,
-                partialFilterExpression={
-                    "razorpay_payment_id": {"$type": "string"}
-                }
-            ),
+    razorpay_order_id: Mapped[str | None] = mapped_column(
+        String(100),
+        unique=True,
+        nullable=True,
+    )
 
-            IndexModel(
-                [("registration_id", ASCENDING)]
-            ),
+    razorpay_payment_id: Mapped[str | None] = mapped_column(
+        String(100),
+        unique=True,
+        nullable=True,
+    )
 
-            IndexModel(
-                [("user_id", ASCENDING)]
-            ),
+    razorpay_signature: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+    )
 
-            IndexModel(
-                [("event_id", ASCENDING)]
-            ),
+    signature_verified: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
 
-            IndexModel(
-                [
-                    ("status", ASCENDING),
-                    ("created_at", DESCENDING)
-                ]
-            ),
-        ]
+    failure_reason: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+    )
+
+    gateway_error_code: Mapped[str | None] = mapped_column(
+        String(100),
+        nullable=True,
+    )
+
+    paid_at: Mapped[datetime | None] = mapped_column(
+        DateTime,
+        nullable=True,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        nullable=False,
+    )
+
+    updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime,
+        nullable=True,
+    )

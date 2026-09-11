@@ -1,4 +1,5 @@
 from typing import Optional
+from contextlib import asynccontextmanager
 import hmac
 import logging
 
@@ -10,7 +11,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from api.api import api_router
 from core.config import settings
-from db.init_db import init_db
+from db.session import close_database, test_database_connection
 from monitoring.logger import setup_logging
 from monitoring.middleware import RequestLoggingMiddleware
 from monitoring.sentry import init_sentry
@@ -22,23 +23,31 @@ ENVIRONMENT = (settings.PYTHON_ENV or "development").lower()
 DEPLOYMENT_PLATFORM = settings.DEPLOYE_PLATFORM
 CORS_ORIGINS = settings.BACKEND_CORS_ORIGINS
 
+logger = logging.getLogger("main")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    connected = await test_database_connection()
+    if connected:
+        logger.info("Database connection successful", extra={"type": "startup_db_connection"})
+    else:
+        logger.error("Database connection failed", extra={"type": "startup_db_connection"})
+
+    try:
+        yield
+    finally:
+        await close_database()
+
+
 app = FastAPI(
     title="STP API",
     version="0.1.0",
     docs_url="/docs",
     redoc_url="/redoc",
+    lifespan=lifespan,
 )
 
 app.add_middleware(RequestLoggingMiddleware)
-
-logger = logging.getLogger("main")
-
-@app.on_event("startup")
-async def startup_event():
-    try:
-        await init_db()
-    except Exception as exc:
-        logger.exception("Database initialization failed during startup", extra={"type": "startup_db_init"})
 
 
 if DEPLOYMENT_PLATFORM == "vps":
@@ -215,4 +224,5 @@ app.include_router(api_router, prefix="/api")
 
 @app.get("/")
 def read_root():
+    logger.info("application start", extra={"key_deepti": "deepti value"})
     return {"message": "Welcome to v1 API"}

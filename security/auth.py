@@ -2,13 +2,14 @@ import jwt
 import os
 from datetime import datetime, timedelta
 from fastapi import Request, HTTPException
+from sqlalchemy import select
 
 from core.config import settings
 from utils import auth_util
 from db.models.auth import TokenBlacklist, User
+from db.session import AsyncSessionLocal
 from dependences.dependency import get_client_ip, get_user_agent
 import httpx
-import requests
 
 SECRET_KEY = settings.JWT_SECRET_KEY
 if settings.PYTHON_ENV == "production" and len(SECRET_KEY) < 32:
@@ -16,7 +17,7 @@ if settings.PYTHON_ENV == "production" and len(SECRET_KEY) < 32:
 
 ALGORITHM = settings.ALGORITHM
 
-def create_access_token(user_id: int, role: str, status: str, jti: str, fingerprint: str = None, token_version: int = 1):
+def create_access_token(user_id: int, role: str, status: str, jti: str, fingerprint: str, token_version: int):
     """Creates a short-lived access token (using config value)."""
     minutes = settings.ACCESS_TOKEN_EXPIRE_MINUTES
     expire = auth_util.get_now_utc() + timedelta(minutes=minutes)
@@ -82,20 +83,25 @@ def token_required(allowed_roles: list):
             jti = payload.get("jti")
             user_id = payload.get("user_id")
             token_version = payload.get("version", 1)
-            
-            # Check for TokenBlacklist and User token_version
-            blocked = await TokenBlacklist.find_one(
-                TokenBlacklist.jti == jti,
-                TokenBlacklist.expires_at > auth_util.get_now_utc()
-            )
-            
-            if blocked:
-                raise HTTPException(status_code=401, detail="Token has been revoked/logged out")
-            
-            # Fetch current user to check token version
-            db_user = await User.get(user_id)
-            if db_user is None or db_user.token_version != token_version:
-                raise HTTPException(status_code=401, detail="Session revoked from all devices")
+
+            # Open a short-lived SQLAlchemy session for the security checks
+            async with AsyncSessionLocal() as session:
+                # Check if token is blacklisted (revoked/logged out)
+                stmt_blacklist = select(TokenBlacklist).where(
+                    TokenBlacklist.jti == jti,
+                    TokenBlacklist.expires_at > auth_util.get_now_utc()
+                )
+                blocked = (await session.execute(stmt_blacklist)).scalar_one_or_none()
+
+                if blocked:
+                    raise HTTPException(status_code=401, detail="Token has been revoked/logged out")
+
+                # Fetch current user to check token version
+                stmt_user = select(User).where(User.id == user_id)
+                db_user = (await session.execute(stmt_user)).scalar_one_or_none()
+
+                if db_user is None or db_user.token_version != token_version:
+                    raise HTTPException(status_code=401, detail="Session revoked from all devices")
 
             token_status = str(payload.get("status", "")).upper()
             if token_status != "ACTIVE":
@@ -138,7 +144,3 @@ async def get_client_info(request: Request):
             "user_agent": get_user_agent(request),
             "country": "unknown"
         }
-
-
-
-

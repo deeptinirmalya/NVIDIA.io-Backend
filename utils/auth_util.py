@@ -2,12 +2,17 @@ import re
 import hashlib
 from datetime import datetime, UTC
 from core.config import settings
+from zoneinfo import ZoneInfo
 
 
 
 
 def get_now_utc():
     return datetime.now(UTC)
+
+IST = ZoneInfo("Asia/Kolkata")
+def get_now_ist():
+    return datetime.now(IST)
 
 
 

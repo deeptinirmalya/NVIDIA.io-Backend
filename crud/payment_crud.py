@@ -1,220 +1,119 @@
-"""
-Payment CRUD operations for database access.
-"""
-from datetime import datetime
-from typing import Optional
-from decimal import Decimal
-from beanie import PydanticObjectId
-from db.models.payment import Payment, PaymentStatus
+import asyncio
+import logging
+from fastapi import APIRouter, Depends, Request, Response, HTTPException, status, Query, Header
+from fastapi.responses import JSONResponse
+
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import func, or_, select, cast, String, update
+
+
+from db.models.single_registration import(
+    SingleRegistrationStatus,
+    SingleRegistrationPaymentStatus,
+    SingleRegistration
+)
+
+from db.models.payment import(
+    Payment,
+    PaymentParticipationType,
+    PaymentStatus
+)
+
+from db.models.event import (Event)
+
 from utils import util, auth_util
+from services.razorpay_client import razorpay_client
 
 
-class PaymentCRUD:
+logger = logging.getLogger("payment_crud")
 
-
-    @staticmethod
-    async def create_payment(
-        event_id: PydanticObjectId,
-        user_id: PydanticObjectId,
-        amount: Decimal,
-        idempotency_key: str,
-        currency: str = "INR",
-        registration_id: Optional[PydanticObjectId] = None,
-        team_id: Optional[PydanticObjectId] = None,
-        status: PaymentStatus = PaymentStatus.CREATED,
-        session=None,
-    ) -> Payment:
-        """
-        Create a new payment.
-        
-        Args:
-            event_id: Event ID
-            user_id: User ID (payer - typically captain for team payments)
-            amount: Payment amount in base units (e.g., 500 for ₹500)
-            idempotency_key: Unique key to prevent duplicate payments
-            currency: Currency code (default: INR)
-            registration_id: Registration ID (optional, set after payment succeeds)
-            team_id: Team ID (for team payments)
-            status: Payment status (default: CREATED)
-        
-        Returns:
-            Created Payment document
-        """
-        payment = Payment(
-            event_id=event_id,
-            user_id=user_id,
-            amount=amount,
-            currency=currency,
-            status=status,
-            registration_id=registration_id,
-            team_id=team_id,
-            idempotency_key=idempotency_key,
-            created_at=auth_util.get_now_utc(),
-            updated_at=auth_util.get_now_utc(),
-        )
-        await payment.insert(session=session)
-        return payment
+class PaymentCrudServices:
 
     @staticmethod
-    async def get_payment_by_id(payment_id: PydanticObjectId) -> Optional[Payment]:
-        return await Payment.get(payment_id)
+    async def initialize_single_starter_payment_entry(
+        db: AsyncSession,
+        event_id: int,
+        user_id: int,
+        participation_id: int,
+        idempotenci_key: str,
+    ):
+        try:
+            # Select the full Event row so .price is accessible
+            stmt = select(Event).where(Event.id == event_id)
+            event_details = (await db.execute(stmt)).scalar_one_or_none()
+
+            # Guard: event could have been deleted between availability check and here
+            if event_details is None:
+                raise HTTPException(status_code=404, detail="Event no longer available")
+
+            new_starter_entry = Payment(
+                participation_type=PaymentParticipationType.SINGLE,
+                single_registration_id=participation_id,
+                amount=event_details.price,
+                idempotency_key=idempotenci_key,
+                created_at=auth_util.get_now_utc()
+            )
+            db.add(new_starter_entry)
+            await db.flush()
+
+            amount = event_details.price * 100
+            # Razorpay SDK is synchronous — run in thread pool to avoid blocking the event loop
+            order = await asyncio.to_thread(
+                razorpay_client.order.create,
+                {
+                    "amount": amount,
+                    "currency": "INR",
+                    "receipt": f"single_participate_{participation_id}",
+                    "notes": {
+                        "participation_type": "SINGLE",
+                        "participate_id": str(participation_id),
+                        "event_id": str(event_id),
+                        "user_id": str(user_id),
+                    }
+                }
+            )
+            update_stmt = (update(Payment).where(Payment.id == new_starter_entry.id).values(razorpay_order_id=order["id"]))
+            await db.execute(update_stmt)
+
+            await db.commit()
+
+            return {
+                "order_id": order["id"]
+            }
+        except HTTPException as httpe:
+            raise httpe
+        except Exception as e:
+            await db.rollback()
+            logger.exception("Exception in PaymentCrudServices – initialize_single_starter_payment_entry", extra={"event_id": event_id, "user_id": user_id, "error": str(e)})
+            raise HTTPException(status_code=500, detail="Server busy")
 
     @staticmethod
-    async def get_payment_by_idempotency_key(
-        idempotency_key: str,
-    ) -> Optional[Payment]:
-        payment = await Payment.find_one({"idempotency_key": idempotency_key})
-        return payment
+    async def update_transactin_to_processing(db: AsyncSession, db_result, data, user_id, participation_type):
+        if participation_type == "SINGLE":
+            registration_id = db_result.single_registration_id
+        else:
+            registration_id = db_result.team_registration_id
+        try:
+            db_result.status = PaymentStatus.PROCESSING
+            db_result.razorpay_payment_id = data.razorpay_payment_id
+            db_result.razorpay_signature = data.razorpay_signature
+            db_result.signature_verified = True
 
-    @staticmethod
-    async def get_payment_by_razorpay_order_id(
-        razorpay_order_id: str,
-    ) -> Optional[Payment]:
-        payment = await Payment.find_one({"razorpay_order_id": razorpay_order_id})
-        return payment
-
-    @staticmethod
-    async def get_payment_by_razorpay_payment_id(
-        razorpay_payment_id: str,
-    ) -> Optional[Payment]:
-        payment = await Payment.find_one({"razorpay_payment_id": razorpay_payment_id})
-        return payment
-
-    @staticmethod
-    async def get_user_payments(
-        user_id: PydanticObjectId,
-        limit: int = 50,
-        skip: int = 0,
-    ) -> list[Payment]:
-        payments = (
-            await Payment.find({"user_id": user_id})
-            .skip(skip)
-            .limit(limit)
-            .to_list()
-        )
-        return payments
-
-    @staticmethod
-    async def get_event_payments(
-        event_id: PydanticObjectId,
-        limit: int = 100,
-        skip: int = 0,
-    ) -> list[Payment]:
-        payments = (
-            await Payment.find({"event_id": event_id})
-            .skip(skip)
-            .limit(limit)
-            .to_list()
-        )
-        return payments
-
-    @staticmethod
-    async def count_payments_by_status(
-        event_id: PydanticObjectId,
-        status: PaymentStatus,
-    ) -> int:
-        count = await Payment.find({"event_id": event_id, "status": status}).count()
-        return count
-
-    @staticmethod
-    async def update_payment_status(
-        payment_id: PydanticObjectId,
-        status: PaymentStatus,
-    ) -> Optional[Payment]:
-        payment = await Payment.get(payment_id)
-        if payment:
-            payment.status = status
-            payment.updated_at = auth_util.get_now_utc()
-            await payment.save()
-        return payment
-
-    @staticmethod
-    async def update_payment_with_razorpay_order(
-        payment_id: PydanticObjectId,
-        razorpay_order_id: str,
-        session=None,
-    ) -> Optional[Payment]:
-
-        payment = await Payment.get(payment_id)
-        if payment:
-            payment.razorpay_order_id = razorpay_order_id
-            payment.status = PaymentStatus.PROCESSING
-            payment.updated_at = auth_util.get_now_utc()
-            await payment.save(session=session)
-        return payment
-
-    @staticmethod
-    async def update_payment_with_razorpay_response(
-        payment_id: PydanticObjectId,
-        razorpay_payment_id: str,
-        razorpay_signature: str,
-    ) -> Optional[Payment]:
-        payment = await Payment.get(payment_id)
-        if payment:
-            payment.razorpay_payment_id = razorpay_payment_id
-            payment.razorpay_signature = razorpay_signature
-            payment.status = PaymentStatus.SUCCESS
-            payment.signature_verified = True
-            payment.completed_at = auth_util.get_now_utc()
-            payment.updated_at = auth_util.get_now_utc()
-            await payment.save()
-        return payment
-
-    @staticmethod
-    async def mark_payment_failed(
-        payment_id: PydanticObjectId,
-        failure_reason: str,
-    ) -> Optional[Payment]:
-        payment = await Payment.get(payment_id)
-        if payment:
-            payment.status = PaymentStatus.FAILED
-            payment.failure_reason = failure_reason
-            payment.updated_at = auth_util.get_now_utc()
-            await payment.save()
-        return payment
-
-    @staticmethod
-    async def set_payment_registration_id(
-        payment_id: PydanticObjectId,
-        registration_id: PydanticObjectId,
-    ) -> Optional[Payment]:
-        payment = await Payment.get(payment_id)
-        if payment:
-            payment.registration_id = registration_id
-            payment.updated_at = auth_util.get_now_utc()
-            await payment.save()
-        return payment
-
-    @staticmethod
-    async def mark_webhook_received(
-        payment_id: PydanticObjectId,
-    ) -> Optional[Payment]:
-
-        payment = await Payment.get(payment_id)
-        if payment:
-            payment.webhook_received = True
-            payment.webhook_received_at = auth_util.get_now_utc()
-            await payment.save()
-        return payment
-
-    @staticmethod
-    async def get_payments_by_status(
-        event_id: PydanticObjectId,
-        status: PaymentStatus,
-        limit: int = 100,
-    ) -> list[Payment]:
-        payments = (
-            await Payment.find({"event_id": event_id, "status": status})
-            .limit(limit)
-            .to_list()
-        )
-        return payments
-
-    @staticmethod
-    async def refund_payment(
-        payment_id: PydanticObjectId,
-    ) -> Optional[Payment]:
-        return await PaymentCRUD.update_payment_status(
-            payment_id,
-            PaymentStatus.REFUNDED,
-        )
+            await db.commit()
+            return JSONResponse(
+                status_code=201,
+                content={
+                    "success": True,
+                    "message": "payment verified",
+                    "data":{
+                        "registration_id": registration_id,
+                        "participation_type": participation_type
+                    }
+                }
+            )
+        except HTTPException as httpe:
+            raise httpe
+        except Exception as e:
+            await db.rollback()
+            logger.exception("Exception in PaymentCrudServices – update_transactin_to_processing", extra={"user_id": user_id, "error": str(e)})
+            raise HTTPException(status_code=500, detail="Internal server Error")
