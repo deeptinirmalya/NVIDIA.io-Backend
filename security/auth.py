@@ -18,9 +18,9 @@ if settings.PYTHON_ENV == "production" and len(SECRET_KEY) < 32:
 ALGORITHM = settings.ALGORITHM
 
 def create_access_token(user_id: int, role: str, status: str, jti: str, fingerprint: str, token_version: int):
-    """Creates a short-lived access token (using config value)."""
+
     minutes = settings.ACCESS_TOKEN_EXPIRE_MINUTES
-    expire = auth_util.get_now_utc() + timedelta(minutes=minutes)
+    expire = auth_util.get_now_utc() + timedelta(hours=42)
     to_encode = {
         "sub": str(user_id),
         "user_id": user_id,
@@ -34,16 +34,6 @@ def create_access_token(user_id: int, role: str, status: str, jti: str, fingerpr
     }
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
-def create_refresh_token(user_id: int):
-    """Creates a long-lived refresh token (7 days)."""
-    expire = auth_util.get_now_utc() + timedelta(days=7)
-    to_encode = {
-        "sub": str(user_id),
-        "user_id": user_id,
-        "exp": expire,
-        "type": "refresh"
-    }
-    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
 def token_required(allowed_roles: list):
 

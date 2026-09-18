@@ -8,7 +8,7 @@ class Settings(BaseSettings):
     PROJECT_NAME: str = "sjn-demo"
     API_V1_STR: str = "/api/v1"
     
-    # Environment
+    # environment
     PYTHON_ENV: str = os.getenv("PYTHON_ENV", "development")
     DEPLOYE_PLATFORM: str = os.getenv("DEPLOYE_PLATFORM", "vps")
 
@@ -25,10 +25,13 @@ class Settings(BaseSettings):
 
     IS_REAL: bool = os.getenv("IS_REAL", "False").lower() == "true"
     
-    # Security
+    # security
     JWT_SECRET_KEY: str = os.getenv("JWT_SECRET_KEY", "fallback-secret-key-at-least-32-chars-long")
     ALGORITHM: str = os.getenv("ALGORITHM", "HS256")
     ACCESS_TOKEN_EXPIRE_MINUTES: int = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", 11520))
+
+    #encryption
+    ENCRYPTION_KEY: str = os.getenv("ENCRYPTION_KEY", "fallback-secret-key-at-least-64-chars-long")
     
     # Engine 1: Rate Limiter (Local Redis)
     REDIS_URL: str = os.getenv("REDIS_URL", "redis://localhost:6379/1")

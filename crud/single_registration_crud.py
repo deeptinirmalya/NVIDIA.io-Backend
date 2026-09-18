@@ -38,7 +38,7 @@ class SingleregistrationCrudService:
             db.add(new_free_registration)
             await db.commit()
 
-            logger.info(f"Userparticipate on  {event_id} free single", extra={"event_id": event_id, "user_id": user_id})
+            logger.info(f"User participate on  {event_id} free single", extra={"event_id": event_id, "user_id": user_id})
 
             return JSONResponse(
                 status_code=201,

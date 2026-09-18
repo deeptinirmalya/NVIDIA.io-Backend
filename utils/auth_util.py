@@ -52,6 +52,7 @@ def validate_password(password: str):
     
     return True, ""
 
+
 def generate_fingerprint(ip: str, user_agent: str) -> str:
     data = f"{ip}|{user_agent}"
     return hashlib.sha256(data.encode()).hexdigest()

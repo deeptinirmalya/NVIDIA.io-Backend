@@ -121,11 +121,11 @@ class User(Base):
     )
 
 
-    refresh_tokens = relationship(
-        "RefreshToken",
-        back_populates="user",
-        cascade="all, delete-orphan",
-    )
+    # refresh_tokens = relationship(
+    #     "RefreshToken",
+    #     back_populates="user",
+    #     cascade="all, delete-orphan",
+    # )
 
     login_history = relationship(
         "LoginHistory",
@@ -207,65 +207,65 @@ class Profile(Base):
 
 
 
-class RefreshToken(Base):
-    __tablename__ = "refresh_tokens"
+# class RefreshToken(Base):
+#     __tablename__ = "refresh_tokens"
 
-    __table_args__ = (
-        Index(
-            "idx_refresh_tokens_user_active_expiry",
-            "user_id",
-            "revoked",
-            "expires_at",
-        ),
-    )
+#     __table_args__ = (
+#         Index(
+#             "idx_refresh_tokens_user_active_expiry",
+#             "user_id",
+#             "revoked",
+#             "expires_at",
+#         ),
+#     )
 
-    id: Mapped[int] = mapped_column(
-        BIGINT(unsigned=True),
-        primary_key=True,
-        autoincrement=True,
-    )
+#     id: Mapped[int] = mapped_column(
+#         BIGINT(unsigned=True),
+#         primary_key=True,
+#         autoincrement=True,
+#     )
 
-    user_id: Mapped[int] = mapped_column(
-        BIGINT(unsigned=True),
-        ForeignKey(
-            "users.id",
-            ondelete="CASCADE",
-            name="fk_refresh_token_user",
-        ),
-        nullable=False,
-    )
+#     user_id: Mapped[int] = mapped_column(
+#         BIGINT(unsigned=True),
+#         ForeignKey(
+#             "users.id",
+#             ondelete="CASCADE",
+#             name="fk_refresh_token_user",
+#         ),
+#         nullable=False,
+#     )
 
-    token_hash: Mapped[str] = mapped_column(
-        String(255),
-        unique=True,
-        nullable=False,
-    )
+#     token_hash: Mapped[str] = mapped_column(
+#         String(255),
+#         unique=True,
+#         nullable=False,
+#     )
 
-    expires_at: Mapped[datetime] = mapped_column(
-        DateTime,
-        nullable=False,
-    )
+#     expires_at: Mapped[datetime] = mapped_column(
+#         DateTime,
+#         nullable=False,
+#     )
 
-    revoked: Mapped[bool] = mapped_column(
-        Boolean,
-        nullable=False,
-        default=False,
-    )
+#     revoked: Mapped[bool] = mapped_column(
+#         Boolean,
+#         nullable=False,
+#         default=False,
+#     )
 
-    ip_address: Mapped[str | None] = mapped_column(
-        String(45),
-        nullable=True,
-    )
+#     ip_address: Mapped[str | None] = mapped_column(
+#         String(45),
+#         nullable=True,
+#     )
 
-    user_agent: Mapped[str | None] = mapped_column(
-        String(500),
-        nullable=True,
-    )
+#     user_agent: Mapped[str | None] = mapped_column(
+#         String(500),
+#         nullable=True,
+#     )
 
-    user = relationship(
-        "User",
-        back_populates="refresh_tokens",
-    )
+#     user = relationship(
+#         "User",
+#         back_populates="refresh_tokens",
+#     )
 
 
 class LoginHistory(Base):

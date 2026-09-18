@@ -44,7 +44,7 @@ class JSONFormatter(logging.Formatter):
             if key not in standard_attrs:
                 log_data[key] = value
                 
-        return json.dumps(log_data)
+        return json.dumps(log_data, default=str)
 
 class DevelopmentFormatter(logging.Formatter):
     COLORS = {

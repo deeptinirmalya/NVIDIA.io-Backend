@@ -9,9 +9,7 @@ from fastapi import Request, HTTPException, Depends
 from core.config import settings
 from dependences.dependency import get_client_ip
 
-# --------------------------------------------------------------------------- #
-# 1️⃣  Redis connection (fails fast if mis‑configured)
-# --------------------------------------------------------------------------- #
+
 try:
     redis_client = redis.Redis.from_url(
         settings.REDIS_URL,
@@ -19,16 +17,11 @@ try:
         socket_timeout=1,
         socket_connect_timeout=1,
     )
-except Exception as exc:  # pragma: no cover
-    # Log at start‑up – the app will raise 503 on every request that needs
-    # rate‑limiting (see `rate_limiter` below).
+except Exception as exc:
     logging.error(f"⚠️ Rate‑limiter: Redis connection failed – {exc}")
     redis_client = None
 
-# --------------------------------------------------------------------------- #
-# 2️⃣  Lua script – unchanged, but we keep it in a separate constant for
-#     readability.
-# --------------------------------------------------------------------------- #
+
 LUA_SCRIPT = """
 local key = KEYS[1]
 local max_tokens = tonumber(ARGV[1])
@@ -58,21 +51,13 @@ redis.call("EXPIRE", key, 120)
 return {1, tostring(tokens)}
 """
 
-# Register the script once (or keep it None if Redis is down)
 rate_limiter_script = (
     redis_client.register_script(LUA_SCRIPT) if redis_client else None
 )
 
-# --------------------------------------------------------------------------- #
-# 3️⃣  Helper: extract the client IP safely.
-# --------------------------------------------------------------------------- #
+
 TRUSTED_PROXIES = getattr(settings, "TRUSTED_PROXIES", ["127.0.0.1", "::1"])
 
-
-
-# --------------------------------------------------------------------------- #
-# 4️⃣  Main dependency factory
-# --------------------------------------------------------------------------- #
 def rate_limiter(
     max_tokens: int = 10,
     refill_rate: float = 1.0,
@@ -110,7 +95,6 @@ def rate_limiter(
         if mode == "login" and request.method == "POST":
             keys.append(f"rate:login_ip:{client_ip}")
 
-        # Defensive fallback – there should always be at least one key
         if not keys:
             keys.append(f"rate:ip:{client_ip}")
 
@@ -122,7 +106,6 @@ def rate_limiter(
                     args=[max_tokens, refill_rate, now],
                 )
                 if int(allowed) == 0:
-                    # Optional custom hook (e.g. send a captcha email)
                     if on_block:
                         await on_block(request, key)
                     raise HTTPException(
@@ -131,12 +114,7 @@ def rate_limiter(
                     )
             except redis.RedisError as exc:
                 logging.error(f"Redis error in rate limiter for {key}: {exc}")
-
-                # Treat Redis errors as a hard block (fail‑closed)
-                raise HTTPException(
-                    status_code=503,
-                    detail="Rate‑limiting backend error – please try again later",
-                )
+                raise HTTPException(status_code=503, detail="Rate‑limiting backend error – please try again later")
 
 
         logging.info(

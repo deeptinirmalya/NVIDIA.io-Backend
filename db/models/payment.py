@@ -29,6 +29,11 @@ class PaymentStatus(str, PyEnum):
     FAILED = "FAILED"
     REFUNDED = "REFUNDED"
 
+class FirstCame(str, PyEnum):
+    FRONTEND = "FRONTEND"
+    WEBHOOK = "WEBHOOK"
+
+
 
 class Payment(Base):
     __tablename__ = "payments"
@@ -148,6 +153,11 @@ class Payment(Base):
         Boolean,
         nullable=False,
         default=False,
+    )
+
+    first_came: Mapped[FirstCame] = mapped_column(
+        Enum(FirstCame, name="first_came"),
+        nullable=True
     )
 
     failure_reason: Mapped[str | None] = mapped_column(

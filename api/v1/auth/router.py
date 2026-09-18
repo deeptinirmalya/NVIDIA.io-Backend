@@ -224,17 +224,6 @@ async def google(
                 fingerprint, 
                 user.token_version
             )
-            refresh_token = security.create_refresh_token(str(user.id))
-
-            new_refresh = RefreshToken(
-                user_id=user.id,
-                token_hash=auth_util.hash_password(refresh_token),
-                expires_at=now + timedelta(days=7),
-                ip_address=client["ip"],
-                user_agent=client["user_agent"],
-                revoked=False
-            )
-            db.add(new_refresh)
 
             await db.flush()
             await db.commit()
@@ -258,8 +247,6 @@ async def google(
                 "samesite": settings.COOKIE_SAMESITE,
                 "path": "/"
             }
-
-            response.set_cookie(settings.REFRESH_TOKEN_COOKIE_NAME, refresh_token, max_age=7 * 24 * 3600, **cookie_params)
             response.set_cookie(settings.ACCESS_TOKEN_COOKIE_NAME, access_token, max_age=15 * 60, **cookie_params)
             
             return response
@@ -319,17 +306,6 @@ async def google(
             new_user.token_version
         )
 
-        refresh_token = security.create_refresh_token(str(new_user.id))
-
-        new_refresh = RefreshToken(
-            user_id=new_user.id,
-            token_hash=auth_util.hash_password(refresh_token),
-            expires_at=now + timedelta(days=7),
-            ip_address=client["ip"],
-            user_agent=client["user_agent"],
-            revoked=False
-        )
-        db.add(new_refresh)
 
         await db.commit()
         logger.info("Signup db initialization is complete", extra={"email": email})
@@ -350,8 +326,6 @@ async def google(
             "samesite": settings.COOKIE_SAMESITE,
             "path": "/"
         }
-
-        response.set_cookie(settings.REFRESH_TOKEN_COOKIE_NAME, refresh_token, max_age=7 * 24 * 3600, **cookie_params)
         response.set_cookie(settings.ACCESS_TOKEN_COOKIE_NAME, access_token, max_age=15 * 60, **cookie_params)
         
         return response
@@ -523,128 +497,6 @@ async def login(
 
 # ==============================================================================================================================
 
-@auth_router.post(
-    "/refresh",
-    dependencies=[Depends(rate_limiter(max_tokens=10, refill_rate=1.0, mode="ip"))]
-)
-async def refresh_token(
-    request: Request, 
-    response: Response,
-    session: AsyncSession = Depends(get_db)
-):
-
-    refresh_token_cookie = request.cookies.get(settings.REFRESH_TOKEN_COOKIE_NAME)
-    if not refresh_token_cookie:
-        raise HTTPException(status_code=401, detail="Refresh token missing")
-
-    try:
-        payload = security.jwt.decode(
-            refresh_token_cookie, 
-            security.SECRET_KEY, 
-            algorithms=[security.ALGORITHM]
-        )
-        user_id = int(payload.get("user_id"))
-    except Exception:
-        raise HTTPException(status_code=401, detail="Invalid refresh session")
-
-    try:
-        stmt = select(RefreshToken).where(RefreshToken.user_id == user_id)
-        all_tokens = (await session.execute(stmt)).scalars().all()
-        
-        matching_token = next((t for t in all_tokens if auth_util.verify_password(refresh_token_cookie, t.token_hash)), None)
-                
-        if not matching_token:
-            raise HTTPException(status_code=401, detail="Session not found")
-
-        if matching_token.revoked:
-            # Security breach: revoke all sessions then rollback not needed — this is intentional
-            await session.execute(update(RefreshToken).where(RefreshToken.user_id == user_id).values(revoked=True))
-            await session.commit()
-            raise HTTPException(status_code=403, detail="Security breach detected. All sessions revoked.")
-
-        stmt_history = select(LoginHistory).where(LoginHistory.user_id == user_id).order_by(asc(LoginHistory.login_at))
-        user_history = (await session.execute(stmt_history)).scalars().all()
-        history_dicts = [{"ip_address": h.ip_address, "country": h.country, "user_agent": h.user_agent, "login_at": h.login_at} for h in user_history]
-
-        client = await security.get_client_info(request)
-        risk = auth_util.calculate_risk_refresh(client, history_dicts) 
-        
-        if risk >= 100:
-            await session.execute(update(RefreshToken).where(RefreshToken.user_id == user_id).values(revoked=True))
-            await session.commit()
-            raise HTTPException(status_code=403, detail="Risk anomaly detected. Please log in again.")
-
-        stmt_user = select(User).where(User.id == user_id)
-        user = (await session.execute(stmt_user)).scalar_one_or_none()
-        
-        if not user or user.status != UserStatus.ACTIVE:
-            raise HTTPException(status_code=403, detail="Account restricted")
-
-        # Rotate: revoke old token, issue new tokens
-        matching_token.revoked = True
-        
-        new_jti = str(uuid.uuid4())
-        fingerprint = auth_util.generate_fingerprint(client["ip"], client["user_agent"])
-        
-        new_access_token = security.create_access_token(
-            str(user.id), 
-            user.role.value, 
-            user.status.value, 
-            new_jti, 
-            fingerprint, 
-            user.token_version
-        )
-        new_refresh_token = security.create_refresh_token(str(user.id))
-        
-        now = auth_util.get_now_utc()
-
-        new_refresh_obj = RefreshToken(
-            user_id=user.id,
-            token_hash=auth_util.hash_password(new_refresh_token),
-            expires_at=now + timedelta(days=7),
-            ip_address=client["ip"],
-            user_agent=client["user_agent"],
-            revoked=False
-        )
-        session.add(new_refresh_obj)
-        
-        new_history = LoginHistory(
-            user_id=user.id,
-            ip_address=client["ip"],
-            user_agent=client["user_agent"],
-            country=client.get("country"),
-            risk_score=risk,
-            login_at=now
-        )
-        session.add(new_history)
-
-        await session.flush()
-
-        # commit all refresh writes
-        await session.commit()
-        logger.info("Refresh DB commit successful", extra={"user_id": str(user.id)})
-
-    except HTTPException:
-        await session.rollback()
-        raise
-    except Exception as e:
-        await session.rollback()
-        logger.exception("Database error during token refresh", exc_info=e)
-        raise HTTPException(status_code=500, detail="Database error during token refresh")
-
-    response_obj = JSONResponse(content={"success": True, "message": "Session rotated"})
-    
-    cookie_settings = {
-        "httponly": True,
-        "secure": settings.COOKIE_SECURE,
-        "samesite": settings.COOKIE_SAMESITE,
-        "path": "/"
-    }
-
-    response_obj.set_cookie(settings.REFRESH_TOKEN_COOKIE_NAME, new_refresh_token, max_age=7*24*3600, **cookie_settings)
-    response_obj.set_cookie(settings.ACCESS_TOKEN_COOKIE_NAME, new_access_token, max_age=900, **cookie_settings)
-    
-    return response_obj
 
 
 @auth_router.post("/logout")
@@ -667,24 +519,11 @@ async def logout(
         posthog.capture(distinct_id=str(user_id), event="user_logged_out", properties={"super_logout": super_logout})
 
         if super_logout:
-            # Revoke all refresh tokens for this user
-            await session.execute(update(RefreshToken).where(RefreshToken.user_id == user_id).values(revoked=True))
-            
             # Increment token_version to invalidate all existing access tokens across all devices
             stmt_user = select(User).where(User.id == user_id)
             user = (await session.execute(stmt_user)).scalar_one_or_none()
             if user:
                 user.token_version += 1
-        else:
-            # Revoke only the current refresh token from the cookie
-            refresh_token_cookie = request.cookies.get(settings.REFRESH_TOKEN_COOKIE_NAME)
-            if refresh_token_cookie:
-                stmt = select(RefreshToken).where(RefreshToken.user_id == user_id, RefreshToken.revoked == False)
-                all_tokens = (await session.execute(stmt)).scalars().all()
-                
-                matching_token = next((t for t in all_tokens if auth_util.verify_password(refresh_token_cookie, t.token_hash)), None)
-                if matching_token:
-                    matching_token.revoked = True
 
         await session.flush()
         await session.commit()
@@ -708,18 +547,7 @@ async def logout(
             "errors": None
         }
     )
-    response_obj.delete_cookie(
-        settings.REFRESH_TOKEN_COOKIE_NAME,
-        path="/",
-        secure=settings.COOKIE_SECURE,
-        samesite=settings.COOKIE_SAMESITE
-    )
-    response_obj.delete_cookie(
-        settings.ACCESS_TOKEN_COOKIE_NAME,
-        path="/",
-        secure=settings.COOKIE_SECURE,
-        samesite=settings.COOKIE_SAMESITE
-    )
+    response_obj.delete_cookie(settings.ACCESS_TOKEN_COOKIE_NAME,path="/",secure=settings.COOKIE_SECURE,samesite=settings.COOKIE_SAMESITE)
 
     return response_obj
 
@@ -738,36 +566,4 @@ async def list_sessions(
         "success": True,
         "message": "Active sessions retrieved",
         "data": [{"id": str(s.id), "ip_address": s.ip_address, "user_agent": s.user_agent, "expires_at": s.expires_at.isoformat()} for s in sessions]
-    }
-
-@auth_router.delete("/sessions/{session_id}")
-async def revoke_session(
-    session_id: int,
-    user_data: dict = Depends(security.token_required(allowed_roles=[r.value for r in UserRole])),
-    session: AsyncSession = Depends(get_db)
-):
-    """Revoke a specific session."""
-    try:
-        stmt = select(RefreshToken).where(RefreshToken.id == session_id)
-        session_obj = (await session.execute(stmt)).scalar_one_or_none()
-
-        if not session_obj or session_obj.user_id != int(user_data.get("user_id")):
-            raise HTTPException(status_code=404, detail="Session not found")
-
-        session_obj.revoked = True
-        await session.flush()
-        await session.commit()
-        logger.info("Session revoked", extra={"session_id": session_id})
-
-    except HTTPException:
-        await session.rollback()
-        raise
-    except Exception as e:
-        await session.rollback()
-        logger.exception("Database error during session revocation", exc_info=e)
-        raise HTTPException(status_code=500, detail="Could not revoke session")
-
-    return {
-        "success": True,
-        "message": f"Session {session_id} revoked successfully"
     }

@@ -263,14 +263,14 @@ async def get_event_details(
 
 
 @event_router.post("/participate/{event_id}/single-event")
-async def participate_on_event(
+async def participate_on_single_event(
     event_id: int,
     db: AsyncSession = Depends(get_db),
     # user_data: dict = Depends(token_required(allowed_roles=["STUDENT"])),
     _ = Depends(rate_limiter(max_tokens=5, refill_rate=0.2, mode="user")),
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key")
 ):
-    user_id = 1  # for demo; replace with token user id later
+    user_id = 2  # for demo; replace with token user id later
 
     try:
         # 1. Check event availability
@@ -285,12 +285,7 @@ async def participate_on_event(
             if not idempotency_key:
                 raise HTTPException(status_code=400, detail="Idempotency-Key header is required for paid events")
 
-            entry_result = await RegistrationService.check_or_create_single_paid_registration(
-                db,
-                event_id,
-                user_id,
-                idempotency_key
-            )
+            entry_result = await RegistrationService.check_or_create_single_paid_registration(db, event_id, user_id, idempotency_key)
 
 
             if isinstance(entry_result, JSONResponse):
@@ -310,14 +305,43 @@ async def participate_on_event(
             )
         
 
-
-
-
-
     except HTTPException as httpe:
         
         raise httpe
     except Exception as e:
         await db.rollback()
-        logger.exception("Failsd to participate in event", extra={"event_id": event_id, "error": str(e)})
+        logger.exception("Failed to participate in event", extra={"event_id": event_id, "error": str(e)})
         raise HTTPException(status_code=500, detail="Faild to participate in event")
+
+
+
+
+# @event_router.post("/create/team/{event_id}/{team_name}")
+# async def participate_on_team_event(
+#     event_id: int,
+#     team_name: str,
+#     db: AsyncSession = Depends(get_db),
+#     # user_data: dict = Depends(token_required(allowed_roles=["STUDENT"])),
+#     _ = Depends(rate_limiter(max_tokens=5, refill_rate=0.2, mode="user")),
+#     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key")
+# ):
+#     user_id = 1 # for demo leter change to jwt TODO: change to jwt
+#     try:
+#         event_details = await RegistrationService.check_team_event_availability_for_participation(db, event_id, user_id)
+#         if not event_details["data"].get("is_paid"):  # free event
+#             return await RegistrationService.check_or_create_team_free_registration(db, event_id, user_id, team_name)
+#             # check or create registration and return its response
+#         else:
+#             if not idempotency_key:
+#                 raise HTTPException(status_code=400, detail="Idempotency Key  is required for events")
+
+#             entry_result = await RegistrationService.check_or_create_team_paid_registration(db, event_id, user_id, idempotency_key, team_name)
+
+#             if isinstance(entry_result, JSONResponse):
+#                 return entry_result
+            
+#     except HTTPException as httpe:
+#         raise httpe
+#     except Exception as e:
+#         logger.exception(f"exception during team reistration {event_id}", extra={"user_id": user_id, "event_id": event_id})
+#         raise HTTPException(status_code=500, detail="Internal server error")
