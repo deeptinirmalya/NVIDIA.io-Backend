@@ -14,7 +14,7 @@ import re
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update, desc, asc
 
-from db.models.auth import User, RefreshToken, LoginHistory, TokenBlacklist, UserStatus, UserRole, Profile
+from db.models.auth import User, LoginHistory, TokenBlacklist, UserStatus, UserRole, Profile
 from db.session import get_db
 from security import auth as security
 from security.rate_limiter import rate_limiter
@@ -552,18 +552,18 @@ async def logout(
     return response_obj
 
 
-@auth_router.get("/sessions")
-async def list_sessions(
-    user_data: dict = Depends(security.token_required(allowed_roles=[r.value for r in UserRole])),
-    session: AsyncSession = Depends(get_db)
-):
-    """List active sessions (refresh tokens) for the current user."""
-    user_id = int(user_data.get("user_id"))
-    stmt = select(RefreshToken).where(RefreshToken.user_id == user_id, RefreshToken.revoked == False)
-    sessions = (await session.execute(stmt)).scalars().all()
+# @auth_router.get("/sessions")
+# async def list_sessions(
+#     user_data: dict = Depends(security.token_required(allowed_roles=[r.value for r in UserRole])),
+#     session: AsyncSession = Depends(get_db)
+# ):
+#     """List active sessions (refresh tokens) for the current user."""
+#     user_id = int(user_data.get("user_id"))
+#     stmt = select(RefreshToken).where(RefreshToken.user_id == user_id, RefreshToken.revoked == False)
+#     sessions = (await session.execute(stmt)).scalars().all()
     
-    return {
-        "success": True,
-        "message": "Active sessions retrieved",
-        "data": [{"id": str(s.id), "ip_address": s.ip_address, "user_agent": s.user_agent, "expires_at": s.expires_at.isoformat()} for s in sessions]
-    }
+#     return {
+#         "success": True,
+#         "message": "Active sessions retrieved",
+#         "data": [{"id": str(s.id), "ip_address": s.ip_address, "user_agent": s.user_agent, "expires_at": s.expires_at.isoformat()} for s in sessions]
+#     }
