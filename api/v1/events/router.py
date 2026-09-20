@@ -50,7 +50,7 @@ from services.registration_service import RegistrationService
 
 
 
-from .schemas import EventCreate, EventResponse
+from .schemas import EventResponse
 from core.config import settings
 from monitoring.posthog import posthog
 
@@ -61,98 +61,7 @@ event_router = APIRouter()
 
 
 
-ALLOWED_IMAGE_TYPES = {
-    "image/png",
-    "image/jpeg",
-}
 
-MAX_IMAGE_SIZE = 3 * 1024 * 1024 
-
-def validate_banner(base64_image: str):
-    try:
-        if not base64_image.startswith("data:image/"):
-            raise HTTPException(status_code=400, detail="Invalid image format")
-
-        header, encoded_data = base64_image.split(",", 1)
-
-
-        mime_type = header.split(";")[0].replace("data:", "")
-
-        if mime_type not in ALLOWED_IMAGE_TYPES:
-            raise HTTPException(status_code=400, detail="Only PNG, JPG and JPEG images are allowed")
-
-        image_bytes = base64.b64decode(
-            encoded_data,
-            validate=True
-        )
-
-        # Validate size
-        if len(image_bytes) > MAX_IMAGE_SIZE:
-            raise HTTPException(status_code=400,detail="Image size must not exceed 10 MB")
-
-        return True
-
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid Base64 image format")
-
-    except binascii.Error:
-        raise HTTPException(status_code=400, detail="Invalid Base64 image data")
-
-
-
-#add token required 
-@event_router.post("/add-event")
-async def create_event(
-    event_data: EventCreate,
-    db: AsyncSession = Depends(get_db),
-    _=Depends(rate_limiter(max_tokens=5, refill_rate=0.25, mode="both"))
-):
-    try:
-        existing_event = await db.scalar(select(Event).where(Event.name == event_data.name))
-
-        if existing_event is not None:
-            logger.warning("Event With this name already exists", extra={"event_name": event_data.name})
-            raise HTTPException(status_code=409, detail="An event with this name already exists")
-
-        validate_banner(event_data.banner)
-
-        image_name = str(secrets.randbelow(9000000000000000) + 1000000000000000)
-
-
-        result = util.cloudinary.uploader.upload(
-            event_data.banner,
-            public_id=image_name,
-            resource_type="image"
-        )
-
-        banner_url = result["secure_url"]
-
-
-        event_values = event_data.model_dump(exclude={"banner"})
-
-        new_event = Event(**event_values, banner_url=banner_url, created_at=auth_util.get_now_utc())
-
-        db.add(new_event)
-        await db.commit()
-
-        return JSONResponse(
-            status_code=201,
-            content={
-                "success": True,
-                "message": "event creation successful",
-                "data": None,
-                "error": None
-            }
-        )
-
-    except HTTPException as httpe:
-        await db.rollback()
-        raise httpe
-
-    except Exception as e:
-        await db.rollback()
-        logger.exception("exception during event creation", extra={"error": str(e)})
-        raise HTTPException(status_code=500, detail="Unable to create event")
 
 
 
@@ -316,32 +225,3 @@ async def participate_on_single_event(
 
 
 
-# @event_router.post("/create/team/{event_id}/{team_name}")
-# async def participate_on_team_event(
-#     event_id: int,
-#     team_name: str,
-#     db: AsyncSession = Depends(get_db),
-#     # user_data: dict = Depends(token_required(allowed_roles=["STUDENT"])),
-#     _ = Depends(rate_limiter(max_tokens=5, refill_rate=0.2, mode="user")),
-#     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key")
-# ):
-#     user_id = 1 # for demo leter change to jwt TODO: change to jwt
-#     try:
-#         event_details = await RegistrationService.check_team_event_availability_for_participation(db, event_id, user_id)
-#         if not event_details["data"].get("is_paid"):  # free event
-#             return await RegistrationService.check_or_create_team_free_registration(db, event_id, user_id, team_name)
-#             # check or create registration and return its response
-#         else:
-#             if not idempotency_key:
-#                 raise HTTPException(status_code=400, detail="Idempotency Key  is required for events")
-
-#             entry_result = await RegistrationService.check_or_create_team_paid_registration(db, event_id, user_id, idempotency_key, team_name)
-
-#             if isinstance(entry_result, JSONResponse):
-#                 return entry_result
-            
-#     except HTTPException as httpe:
-#         raise httpe
-#     except Exception as e:
-#         logger.exception(f"exception during team reistration {event_id}", extra={"user_id": user_id, "event_id": event_id})
-#         raise HTTPException(status_code=500, detail="Internal server error")

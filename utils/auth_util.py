@@ -10,6 +10,11 @@ from zoneinfo import ZoneInfo
 def get_now_utc():
     return datetime.now(UTC)
 
+def as_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
+
 IST = ZoneInfo("Asia/Kolkata")
 def get_now_ist():
     return datetime.now(IST)
@@ -74,11 +79,11 @@ def calculate_risk(current: dict, history: list):
     if current['country'] != last['country']:
         score += 50
 
-        time_diff = (get_now_utc() - last['login_at']).total_seconds() / 3600
+        time_diff = (get_now_utc() - as_utc(last['login_at'])).total_seconds() / 3600
         if time_diff < 2:
             score += 100
             
-    return score
+    return min(score, 100)
 
 
 
@@ -109,8 +114,8 @@ def calculate_risk_refresh(current: dict, history: list):
 
         last_login = last.get('login_at')
         if last_login:
-            time_diff = (get_now_utc() - last_login).total_seconds() / 3600
+            time_diff = (get_now_utc() - as_utc(last_login)).total_seconds() / 3600
             if time_diff < 2:
                 score += 100 
             
-    return score
+    return min(score, 100)

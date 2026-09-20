@@ -3,6 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, Header
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import IntegrityError
 import datetime
+import re
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import func, select
@@ -33,6 +34,12 @@ logger = logging.getLogger("teams")
 
 teams_router = APIRouter()
 
+
+def is_valid_team_name(value):
+    if len(value) > 20:
+        return False
+    return bool(re.fullmatch(r'[A-Za-z0-9_]+', value))
+
 @teams_router.post("/create/team/{event_id}/{team_name}")
 async def participate_on_team_event(
     event_id: int,
@@ -43,6 +50,9 @@ async def participate_on_team_event(
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key")
 ):
     user_id = user_data["user_id"]
+    if not is_valid_team_name(team_name):
+        logger.warning("invalid team name", extra={"user_id": user_id, "team_name": team_name})
+        raise HTTPException(status_code=422, detail="Invalid team name")
     try:
         event_details = await RegistrationService.check_team_event_availability_for_participation(db, event_id, user_id)
         if not event_details["data"].get("is_paid"):  # free event

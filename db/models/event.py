@@ -124,8 +124,8 @@ class Event(Base):
     )
 
     rules: Mapped[str | None] = mapped_column(
-        Text,
-        nullable=True,
+        String(500),
+        nullable=False,
     )
 
     venue: Mapped[str | None] = mapped_column(

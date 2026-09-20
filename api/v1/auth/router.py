@@ -112,6 +112,7 @@ async def get_current_user(
 #apply rate limit
 @auth_router.post("/google")
 async def google(
+    request: Request,
     authorization: str = Header(..., alias="Authorization"),
     x_turnstile_token: str = Header(...),
     db: AsyncSession = Depends(get_db)
@@ -123,12 +124,12 @@ async def google(
 
     try:
         # verify cloudeflare x_turnstile_token token
-        valid_request = await verify_turnstile(Request, x_turnstile_token)
+        valid_request = await verify_turnstile(request, x_turnstile_token)
         if not valid_request:
             logger.warning("Invalid request may but detected")
             raise HTTPException(status_code=403, detail="invalid request")
         
-        client = await get_client_info(Request)
+        client = await get_client_info(request)
         now = auth_util.get_now_utc()
         decoded_token = auth.verify_id_token(token, clock_skew_seconds=60)
 
@@ -247,7 +248,7 @@ async def google(
                 "samesite": settings.COOKIE_SAMESITE,
                 "path": "/"
             }
-            response.set_cookie(settings.ACCESS_TOKEN_COOKIE_NAME, access_token, max_age=15 * 60, **cookie_params)
+            response.set_cookie(settings.ACCESS_TOKEN_COOKIE_NAME, access_token, max_age=15 * 60 * 60, **cookie_params)
             
             return response
 
@@ -272,10 +273,10 @@ async def google(
 
         new_profile = Profile(
             user_id = new_user.id,
-            roll_no="24CSEAIML114",
-            contact_no="78921435582",
-            name="sir ijack newton",
-            semester=4,
+            roll_no="24CSEAIML116",
+            contact_no="78921435583",
+            name="sir ijack newto4n",
+            semester=5,
             academic_session="2025-2029",
             created_at=now
         )
