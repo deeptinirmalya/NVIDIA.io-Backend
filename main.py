@@ -2,6 +2,7 @@ from typing import Optional
 from contextlib import asynccontextmanager
 import hmac
 import logging
+from urllib.parse import urlsplit
 
 from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -23,6 +24,15 @@ ENVIRONMENT = (settings.PYTHON_ENV or "development").lower()
 DEPLOYMENT_PLATFORM = settings.DEPLOYE_PLATFORM
 CORS_ORIGINS = settings.BACKEND_CORS_ORIGINS
 
+currentmode = "normal"
+MAINTENANCE_ALLOWED_PATHS = [
+    "/api/v1/superadmin",
+    "/api/v1/superadmin",
+    "/docs",
+    "/docs/oauth2-redirect",
+    "/openapi.json",
+]
+
 logger = logging.getLogger("main")
 
 @asynccontextmanager
@@ -32,7 +42,6 @@ async def lifespan(app: FastAPI):
         logger.info("Database connection successful", extra={"type": "startup_db_connection"})
     else:
         logger.error("Database connection failed", extra={"type": "startup_db_connection"})
-
     try:
         yield
     finally:
@@ -42,12 +51,37 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="STP API",
     version="0.1.0",
-    docs_url="/docs",
-    redoc_url="/redoc",
+    docs_url="/docs" if ENVIRONMENT != "production" else None,
+    redoc_url="/redoc" if ENVIRONMENT != "production" else None,
     lifespan=lifespan,
 )
 
 app.add_middleware(RequestLoggingMiddleware)
+
+
+@app.middleware("http")
+async def maintenance_mode_middleware(request: Request, call_next):
+    if currentmode.lower() == "maintenance":
+        request_path = request.url.path.rstrip("/") or "/"
+        allowed_path = any(
+            request_path == allowed_path
+            or request_path.startswith(f"{allowed_path}/")
+            for allowed_path in MAINTENANCE_ALLOWED_PATHS
+        )
+
+        if not allowed_path:
+            return JSONResponse(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                content={
+                    "success": False,
+                    "message": "Service is temporarily unavailable for maintenance.",
+                    "data": None,
+                    "error": "Maintenance mode",
+                },
+                headers={"Retry-After": "3600"},
+            )
+
+    return await call_next(request)
 
 
 if DEPLOYMENT_PLATFORM == "vps":
@@ -103,6 +137,28 @@ elif DEPLOYMENT_PLATFORM == "render":
 
 ALLOWED_ORIGINS = set(settings.BACKEND_CORS_ORIGINS)
 
+# Add the deployed frontend origin to ALLOWED_ORIGINS in the production environment.
+def _origin_tuple(value: str):
+    try:
+        parsed = urlsplit(value)
+        if parsed.scheme.lower() not in {"http", "https"} or not parsed.hostname:
+            return None
+        port = parsed.port
+    except ValueError:
+        return None
+
+    scheme = parsed.scheme.lower()
+    if port is None:
+        port = 443 if scheme == "https" else 80
+    return scheme, parsed.hostname.lower(), port
+
+
+ALLOWED_ORIGIN_TUPLES = {
+    origin_tuple
+    for origin in ALLOWED_ORIGINS
+    if (origin_tuple := _origin_tuple(origin)) is not None
+}
+
 @app.middleware("http")
 async def validate_origin_and_referer(request: Request, call_next):
 
@@ -110,8 +166,8 @@ async def validate_origin_and_referer(request: Request, call_next):
         origin = request.headers.get("origin")
         referer = request.headers.get("referer")
 
-        valid_origin = origin in ALLOWED_ORIGINS
-        valid_referer = referer and any(referer.startswith(o) for o in ALLOWED_ORIGINS)
+        valid_origin = _origin_tuple(origin) in ALLOWED_ORIGIN_TUPLES if origin else False
+        valid_referer = _origin_tuple(referer) in ALLOWED_ORIGIN_TUPLES if referer else False
 
         if not (valid_origin or valid_referer):
             return JSONResponse(
@@ -133,10 +189,25 @@ app.add_middleware(
 @app.middleware("http")
 async def add_security_headers(request: Request, call_next):
     response = await call_next(request)
-    response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    
+    if ENVIRONMENT == "production":
+        response.headers["Strict-Transport-Security"] = (
+            "max-age=31536000; includeSubDomains"
+        )
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'none'; "
+            "frame-ancestors 'none'; "
+            "base-uri 'none'; "
+            "form-action 'none';"
+        )
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+
+        return response
+    
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
-    response.headers["X-XSS-Protection"] = "1; mode=block"
     response.headers["Content-Security-Policy"] = (
         "default-src 'self'; "
         "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "

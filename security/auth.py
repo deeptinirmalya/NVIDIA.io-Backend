@@ -18,9 +18,19 @@ if settings.PYTHON_ENV == "production" and len(SECRET_KEY) < 32:
 ALGORITHM = settings.ALGORITHM
 
 def create_access_token(user_id: int, role: str, status: str, jti: str, fingerprint: str, token_version: int):
+    expire = None
+    match role.upper():
+        case "STUDENT":
+            expire = auth_util.get_now_utc() + timedelta(hours=48)
 
-    minutes = settings.ACCESS_TOKEN_EXPIRE_MINUTES
-    expire = auth_util.get_now_utc() + timedelta(hours=42)
+        case "ADMIN":
+            expire = auth_util.get_now_utc() + timedelta(hours=8)
+
+        case "SUPERADMIN":
+            expire = auth_util.get_now_utc() + timedelta(hours=2)
+
+        case _:
+            raise ValueError(f"Unsupported role: {role}")
     to_encode = {
         "sub": str(user_id),
         "user_id": user_id,

@@ -45,7 +45,9 @@ class SingleregistrationCrudService:
                 content={
                     "success": True,
                     "message": "participate success fully",
-                    "data": None,
+                    "data": {
+                        "is_paid":False
+                    },
                     "error": None
                 }
             )

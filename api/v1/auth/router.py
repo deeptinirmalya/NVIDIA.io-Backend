@@ -248,7 +248,7 @@ async def google(
                 "samesite": settings.COOKIE_SAMESITE,
                 "path": "/"
             }
-            response.set_cookie(settings.ACCESS_TOKEN_COOKIE_NAME, access_token, max_age=15 * 60 * 60, **cookie_params)
+            response.set_cookie(settings.ACCESS_TOKEN_COOKIE_NAME, access_token, max_age=48 * 60 * 60, **cookie_params)
             
             return response
 
@@ -327,7 +327,7 @@ async def google(
             "samesite": settings.COOKIE_SAMESITE,
             "path": "/"
         }
-        response.set_cookie(settings.ACCESS_TOKEN_COOKIE_NAME, access_token, max_age=15 * 60, **cookie_params)
+        response.set_cookie(settings.ACCESS_TOKEN_COOKIE_NAME, access_token, max_age=48 * 60 * 60, **cookie_params)
         
         return response
 
@@ -358,143 +358,138 @@ async def login(
     session: AsyncSession = Depends(get_db)
 ):
     pass
-    # verify_user = await verify_turnstile(request, data)
-    # if not verify_user:
-    #     raise HTTPException(status_code=403, detail="Bot Detected")
+    verify_user = await verify_turnstile(request, data)
+    if not verify_user:
+        raise HTTPException(status_code=403, detail="Bot Detected")
 
-    # stmt = select(User).where(User.email == data.identifier)
-    # user = (await session.execute(stmt)).scalar_one_or_none()
+    stmt = select(User).where(User.email == data.identifier)
+    user = (await session.execute(stmt)).scalar_one_or_none()
     
-    # DUMMY_HASH = "$2b$12$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36XVyXm5WjjHyuBxmIdF4Ku"
-    # target_hash = user.password_hash if user else DUMMY_HASH
-    # password_is_correct = auth_util.verify_password(data.password, target_hash)
+    DUMMY_HASH = "$2b$12$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36XVyXm5WjjHyuBxmIdF4Ku"
+    target_hash = user.password_hash if user else DUMMY_HASH
+    password_is_correct = auth_util.verify_password(data.password, target_hash)
     
-    # if not user or not password_is_correct:
-    #     print(f"invalid details {data.identifier} || {data.password}")
-    #     posthog.capture(distinct_id=data.identifier, event="user_login_failed", properties={"reason": "invalid_credentials"})
-    #     return JSONResponse(
-    #         status_code=401,
-    #         content={
-    #             "success": False,
-    #             "message": "Invalid credentials",
-    #             "data": None,
-    #             "error": "INVALID_CREDENTIALS"
-    #         }
-    #     )
+    if not user or not password_is_correct:
+        print(f"invalid details {data.identifier} || {data.password}")
+        posthog.capture(distinct_id=data.identifier, event="user_login_failed", properties={"reason": "invalid_credentials"})
+        return JSONResponse(
+            status_code=401,
+            content={
+                "success": False,
+                "message": "Invalid credentials",
+                "data": None,
+                "error": "INVALID_CREDENTIALS"
+            }
+        )
+    if user.role != UserRole.ADMIN:
+        raise HTTPException(status_code=409, detail="Unauthorize")
 
-    # if user.status == UserStatus.INACTIVE:
-    #     print("user still pending")
-    #     return JSONResponse(
-    #         status_code=401,
-    #         content={
-    #             "success": False,
-    #             "message": "Account not verified",
-    #             "data": None,
-    #             "error": "ACCOUNT_NOT_VERIFIED"
-    #         }
-    #     )
+    if user.status == UserStatus.INACTIVE:
+        print("user still pending")
+        return JSONResponse(
+            status_code=401,
+            content={
+                "success": False,
+                "message": "Account not verified",
+                "data": None,
+                "error": "ACCOUNT_NOT_VERIFIED"
+            }
+        )
 
-    # if user.status != UserStatus.ACTIVE:
-    #     raise HTTPException(
-    #         status_code=403,
-    #         detail="Account is blocked"
-    #     )
+    if user.status != UserStatus.ACTIVE:
+        raise HTTPException(
+            status_code=403,
+            detail="Account is blocked"
+        )
 
-    # if not user.is_verified:
-    #     raise HTTPException(
-    #         status_code=401,
-    #         detail="Account is not verified"
-    #     )
+    if not user.is_verified:
+        raise HTTPException(status_code=401, detail="Account is not verified"
+        )
 
-    # stmt_history = select(LoginHistory).where(LoginHistory.user_id == user.id).order_by(desc(LoginHistory.login_at)).limit(10)
-    # login_history = (await session.execute(stmt_history)).scalars().all()
+    stmt_history = select(LoginHistory).where(LoginHistory.user_id == user.id).order_by(desc(LoginHistory.login_at)).limit(10)
+    login_history = (await session.execute(stmt_history)).scalars().all()
 
-    # history_dicts = [{"ip_address": h.ip_address, "country": h.country, "user_agent": h.user_agent, "login_at": h.login_at} for h in login_history]
+    history_dicts = [{"ip_address": h.ip_address, "country": h.country, "user_agent": h.user_agent, "login_at": h.login_at} for h in login_history]
     
-    # risk = auth_util.calculate_risk(client, history_dicts)
+    risk = auth_util.calculate_risk(client, history_dicts)
     
-    # try:
-    #     now = auth_util.get_now_utc()
-    #     new_history = LoginHistory(
-    #         user_id=user.id,
-    #         ip_address=client["ip"],
-    #         user_agent=client["user_agent"],
-    #         country=client["country"],
-    #         risk_score=risk,
-    #         login_at=now
-    #     )
-    #     session.add(new_history)
+    try:
+        now = auth_util.get_now_utc()
+
+        new_history = LoginHistory(
+            user_id=user.id,
+            ip_address=client["ip"],
+            user_agent=client["user_agent"],
+            country=client["country"],
+            risk_score=risk,
+            login_at=now
+        )
+        session.add(new_history)
         
-    #     if risk >= 100:
-    #         await session.commit()  
-    #         return JSONResponse(
-    #             status_code=403,
-    #             content={
-    #                 "success": False,
-    #                 "message": "Risk too high. Blocked for security.",
-    #                 "data": None,
-    #                 "error": "HIGH_RISK_DETECTED"
-    #             }
-    #         )
+        if risk >= 100:
+            await session.commit()  
+            return JSONResponse(
+                status_code=403,
+                content={
+                    "success": False,
+                    "message": "Risk too high. Blocked for security.",
+                    "data": None,
+                    "error": "HIGH_RISK_DETECTED"
+                }
+            )
 
-    #     user.last_login = now
+        user.last_login = now
 
-    #     jti = str(uuid.uuid4())
-    #     fingerprint = auth_util.generate_fingerprint(client["ip"], client["user_agent"])
+        jti = str(uuid.uuid4())
+        fingerprint = auth_util.generate_fingerprint(client["ip"], client["user_agent"])
         
-    #     access_token = security.create_access_token(
-    #         str(user.id), 
-    #         user.role.value, 
-    #         user.status.value, 
-    #         jti, 
-    #         fingerprint, 
-    #         user.token_version
-    #     )
-    #     refresh_token = security.create_refresh_token(str(user.id))
+        access_token = security.create_access_token(
+            str(user.id), 
+            user.role.value, 
+            user.status.value, 
+            jti, 
+            fingerprint, 
+            user.token_version
+        )
 
-    #     new_refresh = RefreshToken(
-    #         user_id=user.id,
-    #         token_hash=auth_util.hash_password(refresh_token),
-    #         expires_at=now + timedelta(days=7),
-    #         ip_address=client["ip"],
-    #         user_agent=client["user_agent"],
-    #         revoked=False
-    #     )
-    #     session.add(new_refresh)
-    #     await session.flush()
+        # commit all login DB writes
+        await session.commit()
+        logger.info("Login DB commit successful", extra={"user_id": str(user.id)})
 
-    #     # commit all login DB writes
-    #     await session.commit()
-    #     logger.info("Login DB commit successful", extra={"user_id": str(user.id)})
+    except Exception as e:
+        await session.rollback()
+        logger.exception("Database error during login", exc_info=e)
+        raise HTTPException(status_code=500, detail="Database error during login")
 
-    # except Exception as e:
-    #     await session.rollback()
-    #     logger.exception("Database error during login", exc_info=e)
-    #     raise HTTPException(status_code=500, detail="Database error during login")
+    posthog.capture(distinct_id=data.identifier, event="user_logged_in", properties={"role": user.role.value})
 
-    # posthog.capture(distinct_id=data.identifier, event="user_logged_in", properties={"role": user.role.value})
-
-    # response = JSONResponse(
-    #     status_code=200, 
-    #     content={
-    #         "success": True,
-    #         "message": "Logged in successfully",
-    #         "data": {"role": user.role.value},
-    #         "errors": None
-    #     }
-    # )
+    response = JSONResponse(
+        status_code=200, 
+        content={
+            "success": True,
+            "message": "Logged in successfully",
+            "data": {"role": user.role.value},
+            "errors": None
+        }
+    )
     
-    # cookie_params = {
-    #     "httponly": True,
-    #     "secure": settings.COOKIE_SECURE,
-    #     "samesite": settings.COOKIE_SAMESITE,
-    #     "path": "/"
-    # }
+    cookie_params = {
+        "httponly": True,
+        "secure": settings.COOKIE_SECURE,
+        "samesite": settings.COOKIE_SAMESITE,
+        "path": "/"
+    }
 
-    # response.set_cookie(settings.REFRESH_TOKEN_COOKIE_NAME, refresh_token, max_age=7 * 24 * 3600, **cookie_params)
-    # response.set_cookie(settings.ACCESS_TOKEN_COOKIE_NAME, access_token, max_age=15 * 60, **cookie_params)
+    response.set_cookie(settings.ACCESS_TOKEN_COOKIE_NAME, access_token, max_age= 8 * 60 * 60, **cookie_params)
     
-    # return response
+    return response
+
+
+@auth_router.post("/super-admin-login")
+async def super_admin_login():
+    pass
+
+
 
 # ==============================================================================================================================
 

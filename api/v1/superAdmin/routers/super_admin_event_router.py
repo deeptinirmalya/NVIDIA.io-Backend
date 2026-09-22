@@ -1,26 +1,17 @@
-import uuid
-import httpx
 import logging
-from datetime import timedelta
 from fastapi import APIRouter, Depends, Request, Response, HTTPException, status, Query, Header
 from fastapi.responses import JSONResponse
-import firebase_admin
-from firebase_admin import credentials, auth
-from typing import Optional
 import binascii
 import base64
-import hashlib
 import secrets
-import re
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update, desc, asc
 
 from db.session import get_db
-from security.auth import token_required, get_client_info
+from security.auth import token_required
 from security.rate_limiter import rate_limiter
 from utils import auth_util, util
-from templates import email_templates 
 
 
 from ..schemas import EventCreate
@@ -34,7 +25,7 @@ from db.models.event import (
 )
 
 
-logger = logging.getLogger("Super-admin")
+logger = logging.getLogger("Super-admin-Event")
 
 
 superadmin_event_router = APIRouter()
@@ -82,7 +73,7 @@ def validate_banner(base64_image: str):
 async def create_event(
     event_data: EventCreate,
     db: AsyncSession = Depends(get_db),
-    # user_data: dict = Depends(token_required(allowed_roles=["SUPERADMIN"])),
+    user_data: dict = Depends(token_required(allowed_roles=["SUPERADMIN"])),
     _=Depends(rate_limiter(max_tokens=5, refill_rate=0.25, mode="both"))
 ):
     try:

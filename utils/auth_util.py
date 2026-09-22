@@ -3,6 +3,17 @@ import hashlib
 from datetime import datetime, UTC
 from core.config import settings
 from zoneinfo import ZoneInfo
+import base64
+import time
+import io
+import hashlib
+import pyotp
+import qrcode
+from qrcode.image.pil import Image, PilImage
+from cryptography.fernet import Fernet
+import os
+
+from core.config import settings
 
 
 
@@ -119,3 +130,132 @@ def calculate_risk_refresh(current: dict, history: list):
                 score += 100 
             
     return min(score, 100)
+
+
+
+
+
+
+global_secret_code = settings.ENCRYPTION_KEY
+
+def derive_key_fast(salt: bytes) -> bytes:
+    raw_key = hashlib.pbkdf2_hmac(
+        'sha256',
+        global_secret_code.encode('utf-8'),
+        salt,
+        iterations=10_000,
+        dklen=32
+    )
+    return base64.urlsafe_b64encode(raw_key)
+
+
+
+async def generate_totp_qr(account_holder_name: str, platform_name: str = "NVIDIA.io") -> tuple[str, str]:
+    
+    secret = pyotp.random_base32()
+
+    #====================== enc ==========================
+    salt = os.urandom(16)
+    key = derive_key_fast(salt)
+    f = Fernet(key)
+    ciphertext = f.encrypt(secret.encode('utf-8'))
+    payload = salt + ciphertext
+    encript_secret =  base64.b64encode(payload).decode('utf-8')
+    #====================== enc ==========================
+
+    algorithm = hashlib.sha256
+    totp = pyotp.TOTP(secret, digest=algorithm)
+    provisioning_uri = totp.provisioning_uri(
+        name=account_holder_name,
+        issuer_name=platform_name,
+    )
+
+    qr = qrcode.QRCode(
+        version=1,
+        error_correction=qrcode.constants.ERROR_CORRECT_M,
+        box_size=10,
+        border=4,
+    )
+    qr.add_data(provisioning_uri)
+    qr.make(fit=True)
+
+    image = qr.make_image(fill_color="black", back_color="white")
+
+    buffer = io.BytesIO()
+    image.save(buffer, format="PNG")
+
+    # Add data URI prefix here:
+    raw_b64 = base64.b64encode(buffer.getvalue()).decode("utf-8")
+    qr_base64 = f"data:image/png;base64,{raw_b64}"
+
+    return secret, encript_secret, qr_base64
+
+
+
+
+
+async def verify_totp(enc_secret: str, user_code: str,) -> bool:
+    algorithm = hashlib.sha256
+    # =================================== dec ==================================
+    payload = base64.b64decode(enc_secret.encode('utf-8'))
+    salt = payload[:16]
+    ciphertext = payload[16:]
+    key = derive_key_fast(salt)
+    f = Fernet(key)
+    plaintext = f.decrypt(ciphertext)
+    secret = plaintext.decode('utf-8')
+    # =================================== dec ==================================
+    totp = pyotp.TOTP(secret, digest=algorithm)
+    clean_code = str(user_code).strip().replace(" ", "").replace("-", "")
+    return totp.verify(clean_code, valid_window=1)
+
+
+async def current_totp_code(enc_secret: str):
+    algorithm = hashlib.sha256
+    # ========================== dec ========================================
+    payload = base64.b64decode(enc_secret.encode('utf-8'))
+    salt = payload[:16]
+    ciphertext = payload[16:]
+    key = derive_key_fast(salt)
+    f = Fernet(key)
+    plaintext = f.decrypt(ciphertext)
+    secret = plaintext.decode('utf-8')
+    # ========================== dec ========================================
+
+    totp = pyotp.TOTP(secret, digest=algorithm)
+    otp = totp.now()
+    remaining = totp.interval - (time.time() % totp.interval)
+
+    return otp, remaining
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# secret, encript_secret, qr_b64 = generate_totp_qr("deepti2", "NVDIA.io")
+
+# print(f"\nSecret: {secret}")
+# print(f"\nENC Secret: {encript_secret}")
+# print(f"\nBase 64 URI: {qr_b64}")
+
+
+# # secret = input("secret: ")
+# secret = "y/c/heQd9KiHKH0BDRrYfGdBQUFBQUJxcjNfR2tpLURuZ2pFWlQzb0x4UVhxQU04NS1rb0oxX0ZQZC1XRjQzYjV3NVZPU2dwZDAzQmxyMTBYZGd6MTNRWUJta2RTMzJBaFBrQUVqWTFfMU5QeVhpUXdraFNZQ0dTb3FTTjdrRy1kTEc2bGFKemhYV200QWswcC1pRzl1Z1hUdzBN"
+# otp = input("\n\nuser otp:")
+
+# if verify_totp(secret, otp):
+#     print("PASS verified")
+# else:
+#     print("fail")
+
+

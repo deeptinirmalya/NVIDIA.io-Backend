@@ -179,7 +179,7 @@ async def participate_on_single_event(
     _ = Depends(rate_limiter(max_tokens=5, refill_rate=0.2, mode="user")),
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key")
 ):
-    user_id = 2  # for demo; replace with token user id later
+    user_id = 1  # for demo; replace with token user id later
 
     try:
         # 1. Check event availability
@@ -206,6 +206,7 @@ async def participate_on_single_event(
                     "success": True,
                     "message": "Payment created",
                     "data": {
+                        "is_paid": True,
                         "order_id": entry_result["order_id"],
                         "razor_pay_key_id": settings.RAZORPAY_KEY_ID
                     },
@@ -215,8 +216,8 @@ async def participate_on_single_event(
         
 
     except HTTPException as httpe:
-        
         raise httpe
+
     except Exception as e:
         await db.rollback()
         logger.exception("Failed to participate in event", extra={"event_id": event_id, "error": str(e)})

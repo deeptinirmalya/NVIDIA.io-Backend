@@ -115,10 +115,6 @@ class Settings(BaseSettings):
         # PRODUCTION: __Host-access_token
         return "__Host-access_token" if self.COOKIE_SECURE else "access_token"
 
-    @property
-    def REFRESH_TOKEN_COOKIE_NAME(self) -> str:
-        # PRODUCTION: __Host-refresh_token
-        return "__Host-refresh_token" if self.COOKIE_SECURE else "refresh_token"
 
     RENDER_SECRET_HEADER_NAME: str = os.getenv("RENDER_SECRET_HEADER_NAME", "shgdjhgsdhjgsdhjsd")
     SECRET_HEADER_VALUE: str = os.getenv("SECRET_HEADER_VALUE", "sgdyutsudtyusghjgshygs")
