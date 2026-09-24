@@ -55,11 +55,11 @@ user_router = APIRouter()
 @user_router.get("/profile")
 async def get_profile_deails(
     db:AsyncSession = Depends(get_db),
-    # user_data: dict = Depends(token_required(allowed_roles=["STUDENT"])),
+    user_data: dict = Depends(token_required(allowed_roles=["STUDENT"])),
     _ = Depends(rate_limiter(max_tokens=10, refill_rate=0.5, mode="both"))
 ):
-    # user_id = user_data["user_id"]
-    user_id = 1
+    user_id = user_data["user_id"]
+    # user_id = 1
     try:
 
         profile = (
@@ -171,11 +171,11 @@ async def get_profile_deails(
 async def team_details(
     participation_id: int,
     db: AsyncSession = Depends(get_db),
-    # user_data: dict = Depends(token_required(allowed_roles=["STUDENT"])),
+    user_data: dict = Depends(token_required(allowed_roles=["STUDENT"])),
     _ = Depends(rate_limiter(max_tokens=3, refill_rate=0.2, mode="both"))
 ):
-    # user_id = user_data["user_id"]
-    user_id = 1
+    user_id = user_data["user_id"]
+    # user_id = 1
     try:
         team_event = (
             await db.execute(
@@ -340,11 +340,11 @@ async def get_team_payment_details(
 async def get_single_participation_details(
     participation_id: int = Path(..., gt=0),
     db: AsyncSession = Depends(get_db),
-    # user_data: dict = Depends(token_required(allowed_roles=["STUDENT"])),
+    user_data: dict = Depends(token_required(allowed_roles=["STUDENT"])),
     _ = Depends(rate_limiter(max_tokens=3, refill_rate=0.2, mode="both")),
 ):
-    # user_id = user_data["user_id"]
-    user_id = 1
+    user_id = user_data["user_id"]
+    # user_id = 1
 
     try:
         participation = (
@@ -408,11 +408,11 @@ async def get_single_participation_details(
 async def get_single_participation_payment_details(
     participation_id: int = Path(..., gt=0),
     db: AsyncSession = Depends(get_db),
-    # user_data: dict = Depends(token_required(allowed_roles=["STUDENT"])),
+    user_data: dict = Depends(token_required(allowed_roles=["STUDENT"])),
     _ = Depends(rate_limiter(max_tokens=3, refill_rate=0.2, mode="both")),
 ):
-    # user_id = user_data["user_id"]
-    user_id = 1
+    user_id = user_data["user_id"]
+    # user_id = 1
 
     try:
         authorized_participation = (
