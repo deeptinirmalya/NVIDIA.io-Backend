@@ -164,10 +164,9 @@ async def join_team(
         new_team_size = active_member + 1 
         # Update team status 
         if new_team_size >= event_details.max_team_size:
-            team_code_details.status = TeamStatus.FULL
-
-        if new_team_size >= event_details.min_team_size:
-            team_code_details.status = TeamStatus.ELIGIBLE
+            team_code_details.team_status = TeamStatus.FULL
+        elif new_team_size >= event_details.min_team_size:
+            team_code_details.team_status = TeamStatus.ELIGIBLE
 
 
         await db.commit()

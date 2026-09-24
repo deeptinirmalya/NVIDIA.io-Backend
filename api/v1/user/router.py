@@ -167,9 +167,9 @@ async def get_profile_deails(
         raise HTTPException(status_code=500, detail="Internal Server Error")
 
 
-@user_router.get("/team-details/{team_id}")
+@user_router.get("/team-details/{participation_id}")
 async def team_details(
-    team_id: int,
+    participation_id: int,
     db: AsyncSession = Depends(get_db),
     # user_data: dict = Depends(token_required(allowed_roles=["STUDENT"])),
     _ = Depends(rate_limiter(max_tokens=3, refill_rate=0.2, mode="both"))
@@ -196,7 +196,7 @@ async def team_details(
                     TeamMember.team_registration_id == TeamRegistration.id,
                 )
                 .where(
-                    TeamRegistration.id == team_id,
+                    TeamRegistration.id == participation_id,
                     TeamMember.user_id == user_id,
                     TeamMember.is_removed == False,
                     TeamRegistration.status == TeamRegistrationStatus.CONFIRMED,
@@ -224,7 +224,7 @@ async def team_details(
                 )
                 .join(Profile, Profile.user_id == TeamMember.user_id)
                 .where(
-                    TeamMember.team_registration_id == team_id,
+                    TeamMember.team_registration_id == participation_id,
                     TeamMember.is_removed.is_(False),
                 )
                 .order_by(TeamMember.created_at.asc(), TeamMember.user_id.asc())
@@ -237,7 +237,7 @@ async def team_details(
                 "success": True,
                 "message": "Team event details retrieved successfully",
                 "data": {
-                    "team_id": team_id,
+                    "team_id": participation_id,
                     "team_name": team_name,
                     "team_code": team_code,
                     "team_role": member_role.value,
@@ -260,19 +260,19 @@ async def team_details(
     except HTTPException as httpe:
         raise httpe
     except Exception as e:
-        logger.exception("exception during team details fetching", extra={"user_id": user_id, "team_id": team_id, "error": str(e)})
+        logger.exception("exception during team details fetching", extra={"user_id": user_id, "team_id": participation_id, "error": str(e)})
         raise HTTPException(status_code=500, detail="Internal Server Error")
 
 
-@user_router.get("/team-payment-details/{team_id}")
+@user_router.get("/team-payment-details/{participation_id}")
 async def get_team_payment_details(
-    team_id: int = Path(..., gt=0),
+    participation_id: int = Path(..., gt=0),
     db: AsyncSession = Depends(get_db),
-    # user_data: dict = Depends(token_required(allowed_roles=["STUDENT"])),
+    user_data: dict = Depends(token_required(allowed_roles=["STUDENT"])),
     _ = Depends(rate_limiter(max_tokens=3, refill_rate=0.2, mode="both")),
 ):
-    # user_id = user_data["user_id"]
-    user_id = 1
+    user_id = user_data["user_id"]
+    # user_id = 1
     try:
         authorized_team = (
             await db.execute(
@@ -280,7 +280,7 @@ async def get_team_payment_details(
                     TeamMember,
                     TeamMember.team_registration_id == TeamRegistration.id,
                 ).where(
-                    TeamRegistration.id == team_id,
+                    TeamRegistration.id == participation_id,
                     TeamMember.user_id == user_id,
                     TeamMember.is_removed.is_(False),
                     TeamRegistration.status == TeamRegistrationStatus.CONFIRMED,
@@ -298,7 +298,7 @@ async def get_team_payment_details(
         payment = (
             await db.execute(
                 select(Payment).where(
-                    Payment.team_registration_id == team_id,
+                    Payment.team_registration_id == participation_id,
                     Payment.participation_type == PaymentParticipationType.TEAM,
                     Payment.status == PaymentStatus.SUCCESS,
                 ).order_by(Payment.paid_at.desc(), Payment.id.desc())
@@ -314,7 +314,7 @@ async def get_team_payment_details(
                 "success": True,
                 "message": "Team payment details retrieved successfully",
                 "data": {
-                    "team_id": team_id,
+                    "team_id": participation_id,
                     "payment_id": payment.id,
                     "razorpay_order_id": payment.razorpay_order_id,
                     "razorpay_payment_id": payment.razorpay_payment_id,
@@ -331,7 +331,7 @@ async def get_team_payment_details(
     except Exception as e:
         logger.exception(
             "exception during team payment details fetching",
-            extra={"user_id": user_id, "team_id": team_id, "error": str(e)},
+            extra={"user_id": user_id, "team_id": participation_id, "error": str(e)},
         )
         raise HTTPException(status_code=500, detail="Internal Server Error")
     

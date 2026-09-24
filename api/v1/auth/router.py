@@ -273,9 +273,9 @@ async def google(
 
         new_profile = Profile(
             user_id = new_user.id,
-            roll_no="24CSEAIML118",
-            contact_no="78921435567",
-            name="sir ijack newto4n",
+            roll_no="24CSEAIML189",
+            contact_no="78921545567",
+            name="sir ijack",
             semester=5,
             academic_session="2025-2029",
             created_at=now

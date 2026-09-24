@@ -238,6 +238,8 @@ class PaymentCrudServices:
             logger.exception("Exception in PaymentCrudServices – initialize_single_starter_payment_entry", extra={"event_id": event_id, "user_id": user_id, "error": str(e)})
             raise HTTPException(status_code=500, detail="Server busy")
 
+        
+
     @staticmethod
     async def update_transactin_to_processing(db: AsyncSession, db_result, data, user_id, participation_type):
         if participation_type == "SINGLE":
