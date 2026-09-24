@@ -147,10 +147,10 @@ async def google(
         print(f"email : {email}")
 
         # check email patteren
-        pattern = r"^[0-9]{2}[a-zA-Z]+[0-9]{3}\.[a-zA-Z]+@giet\.edu$"
-        if not re.fullmatch(pattern, email):
-            logger.warning(f"in valid email for registration {email}")
-            raise HTTPException(status_code=422, detail="Email must be a valid GIET email address ")
+        # pattern = r"^[0-9]{2}[a-zA-Z]+[0-9]{3}\.[a-zA-Z]+@giet\.edu$"
+        # if not re.fullmatch(pattern, email):
+        #     logger.warning(f"in valid email for registration {email}")
+        #     raise HTTPException(status_code=422, detail="Email must be a valid GIET email address ")
 
         #check in the db
         stmt = select(User).where(User.email == email)
@@ -273,8 +273,8 @@ async def google(
 
         new_profile = Profile(
             user_id = new_user.id,
-            roll_no="24CSEAIML116",
-            contact_no="78921435583",
+            roll_no="24CSEAIML118",
+            contact_no="78921435567",
             name="sir ijack newto4n",
             semester=5,
             academic_session="2025-2029",

@@ -18,7 +18,8 @@ from services.registration_service import RegistrationService
 
 from db.models.team_registration import(
     TeamRegistration,
-    TeamRegistrationStatus
+    TeamRegistrationStatus,
+    TeamStatus
 )
 
 from db.models.event import (
@@ -120,9 +121,15 @@ async def join_team(
                     TeamMember.is_removed == False)
                     )
                 ).scalar()
-        if active_member >= event_details.max_team_size:
+        
+        if active_member > event_details.max_team_size:
+            logger.warning(f"Strict action needed by admin Team over loaded or reached max size team code:- {team_code}")
+            raise HTTPException(status_code=409, detail="Team is full")
+        
+        if active_member == event_details.max_team_size:
             logger.warning(f"Team over loaded or reached max size team code:- {team_code}")
             raise HTTPException(status_code=409, detail="Team is full")
+        
         
         is_already_in_the_event = (
             await db.execute(
@@ -153,6 +160,16 @@ async def join_team(
 
         db.add(new_team_member)
         logger.info("New member added", extra={"event_id": event_id, "team_code": team_code, "user_id": user_id})
+
+        new_team_size = active_member + 1 
+        # Update team status 
+        if new_team_size >= event_details.max_team_size:
+            team_code_details.status = TeamStatus.FULL
+
+        if new_team_size >= event_details.min_team_size:
+            team_code_details.status = TeamStatus.ELIGIBLE
+
+
         await db.commit()
 
         return JSONResponse(

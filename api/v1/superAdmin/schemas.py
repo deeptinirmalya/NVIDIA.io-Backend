@@ -182,3 +182,60 @@ class EventCreate(BaseModel):
             )
 
         return self
+
+
+class EventUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=200)
+    about: str | None = None
+    rules: str | None = Field(default=None, max_length=500)
+    venue: str | None = Field(default=None, max_length=200)
+    registration_start_time: datetime | None = None
+    registration_end_time: datetime | None = None
+    event_start_time: datetime | None = None
+    event_end_time: datetime | None = None
+    status: EventStatus | None = None
+    participation_type: ParticipationType | None = None
+    category: EventCategory | None = None
+    gender_type: GenderType | None = None
+    is_paid: bool | None = None
+    price: int | None = Field(default=None, ge=0)
+    currency: str | None = Field(default=None, min_length=3, max_length=3)
+    min_team_size: int | None = Field(default=None, ge=1)
+    max_team_size: int | None = Field(default=None, ge=1)
+    banner: str | None = None
+
+
+class EventAdminResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    name: str
+    about: str | None
+    rules: str | None
+    venue: str | None
+    registration_start_time: datetime
+    registration_end_time: datetime | None
+    event_start_time: datetime | None
+    event_end_time: datetime | None
+    status: EventStatus
+    participation_type: ParticipationType
+    category: EventCategory
+    gender_type: GenderType
+    is_paid: bool
+    price: int
+    currency: str
+    min_team_size: int | None
+    max_team_size: int | None
+    banner_url: str | None
+    created_at: datetime
+    updated_at: datetime | None
+
+
+
+from pydantic import BaseModel, EmailStr, Field
+
+
+class NewSuperAdminRequest(BaseModel):
+    email: EmailStr
+    password: str = Field(min_length=8, max_length=8)
+    code: int = Field(ge=100000, le=999999)

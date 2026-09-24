@@ -28,3 +28,7 @@ from api.v1.superAdmin.routers.super_admin_management import superadmin_manageme
 v1_router.include_router(superadmin_management_router, prefix="/superadmin/management", tags=["SuperAdminmanagementRouter"])
 
 
+from api.v1.superAdmin.routers.super_admin_system_management import superadmin_system_management_router
+v1_router.include_router(superadmin_system_management_router, prefix="/superadmin/system", tags=["SuperAdminSystemmanagementRouter"])
+
+

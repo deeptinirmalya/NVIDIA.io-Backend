@@ -120,6 +120,12 @@ class User(Base):
         cascade="all, delete-orphan",
     )
 
+    super_admin_totp = relationship(
+        "SuperAdminTotp",
+        back_populates="user",
+        uselist=False,
+        cascade="all, delete-orphan",
+    )
 
     # refresh_tokens = relationship(
     #     "RefreshToken",
@@ -201,6 +207,46 @@ class Profile(Base):
     user = relationship(
         "User",
         back_populates="profile",
+    )
+
+class SuperAdminTotp(Base):
+    __tablename__ = "super_admin_totp"
+
+    id: Mapped[int] = mapped_column(
+        Integer,
+        primary_key=True,
+        autoincrement=True,
+    )
+
+    user_id: Mapped[int] = mapped_column(
+        BIGINT(unsigned=True),
+        ForeignKey(
+            "users.id",
+            ondelete="CASCADE",
+            name="fk_user_totp_users",
+        ),
+        unique=True,
+        nullable=False,
+    )
+
+    secret_key: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        nullable=False,
+    )
+
+    updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime,
+        nullable=True,
+    )
+
+    user = relationship(
+        "User",
+        back_populates="super_admin_totp",
     )
 
 

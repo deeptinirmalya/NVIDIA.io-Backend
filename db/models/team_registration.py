@@ -6,6 +6,7 @@ from sqlalchemy import (
     Enum,
     ForeignKey,
     Index,
+    Integer,
     String,
 )
 from sqlalchemy.dialects.mysql import BIGINT
@@ -17,6 +18,7 @@ from db.models.base import Base
 class TeamStatus(str, PyEnum):
     FORMING = "FORMING"
     FULL = "FULL"
+    ELIGIBLE = "ELIGIBLE"
 
 
 class TeamRegistrationStatus(str, PyEnum):

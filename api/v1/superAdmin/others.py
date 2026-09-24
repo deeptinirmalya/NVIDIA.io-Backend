@@ -41,3 +41,35 @@ async def request_code_to_superadmin(reason: str, user_id: int, db: AsyncSession
 		"success": True,
 		"message": "Code created successfully",
 	}
+
+
+async def verify_superadmin_code(reason: str, user_id: int, db: AsyncSession, code: int):
+
+	# email = (await db.execute(select(User.email).where(User.id == user_id))).scalar_one_or_none()
+	
+	# if email is None:
+	# 			return {
+	# 		"success": False,
+	# 		"message": "No super admin found with this user ID",
+	# 	}
+
+	email = "test@gmail.com"
+	cache_key = f"super_admin_code_by{email}_for_{reason}"
+
+	existing_code = await get_value(cache_key)
+	if existing_code is None:
+		return {
+			"success": False,
+			"message": "Invalid code or code not present",
+		}
+
+	if code != existing_code:
+		return {
+			"success": False,
+			"message": "Invalid code or code not present",
+		}
+
+	return {
+		"success": True,
+		"message": "valid code"
+	}

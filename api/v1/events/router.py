@@ -118,6 +118,28 @@ async def view_events(
         raise HTTPException(status_code=500, detail="Failed to retrieve events")
 
 
+@event_router.delete("/catalogs/cache")
+async def clear_events_cache(
+    # _user_data: dict = Depends(token_required(allowed_roles=["ADMIN", "SUPERADMIN"])),
+    _=Depends(rate_limiter(max_tokens=5, refill_rate=0.5, mode="both")),
+):
+    try:
+        await delete_value("all_events:summary")
+
+        return JSONResponse(
+            status_code=200,
+            content={
+                "success": True,
+                "message": "Events cache cleared successfully",
+                "data": None,
+                "error": None,
+            },
+        )
+    except Exception:
+        logger.exception("Error while clearing events cache")
+        raise HTTPException(status_code=500, detail="Failed to clear events cache")
+
+
 
 
 @event_router.get("/view/{event_id}/details")
@@ -175,11 +197,11 @@ async def get_event_details(
 async def participate_on_single_event(
     event_id: int,
     db: AsyncSession = Depends(get_db),
-    # user_data: dict = Depends(token_required(allowed_roles=["STUDENT"])),
+    user_data: dict = Depends(token_required(allowed_roles=["STUDENT"])),
     _ = Depends(rate_limiter(max_tokens=5, refill_rate=0.2, mode="user")),
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key")
 ):
-    user_id = 1  # for demo; replace with token user id later
+    user_id = user_data["user_id"]
 
     try:
         # 1. Check event availability

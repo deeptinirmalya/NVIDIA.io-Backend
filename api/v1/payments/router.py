@@ -67,11 +67,10 @@ payment_router = APIRouter()
 async def verify_payment_request(
     data: RazorpayPaymentVerificationRequest,
     db: AsyncSession = Depends(get_db),
-    # user_data: dict = Depends(token_required(allowed_roles=["STUDENT"])),
+    user_data: dict = Depends(token_required(allowed_roles=["STUDENT"])),
     _ = Depends(rate_limiter(max_tokens=5, refill_rate=0.2, mode="both")),
 ):
-    # user_id = user_data["user_id"]
-    user_id = 1
+    user_id = user_data["user_id"]
     try:
         result = await PaymentServices.verify_payment_request_by_frontend(db, data, user_id)
         return result
@@ -87,13 +86,15 @@ async def verify_payment_request(
 async def payment_status(
     code: str,
     db: AsyncSession = Depends(get_db),
-    # user_data: dict = Depends(token_required(allowed_roles=["STUDENT"])),
+    user_data: dict = Depends(token_required(allowed_roles=["STUDENT"])),
     _ = Depends(rate_limiter(max_tokens=5, refill_rate=0.2, mode="both")),
 ):
-    # user_id = user_data["user_id"]
-    user_id = 1
+    user_id = user_data["user_id"]
+    # user_id = 1
     try:
         code_data = util.decode_dict(code, settings.ENCRYPTION_KEY)
+
+        print(f"\n code detail: {code_data}\n")
         # return code_data
         if code_data.get("participation_type") == "SINGLE":
             result_of_singel_registration = (await db.execute(select(SingleRegistration).where(SingleRegistration.user_id == user_id, SingleRegistration.id == code_data.get("registration_id")))).scalar_one_or_none()
@@ -116,6 +117,7 @@ async def payment_status(
             result_of_team_registration = (await db.execute(select(TeamRegistration).where(TeamRegistration.captain_id == user_id, TeamRegistration.id == code_data.get("registration_id")))).scalar_one_or_none()
             if result_of_team_registration is None:
                 raise HTTPException(status_code=400, detail="Invalid code")
+            
             if result_of_team_registration.status == TeamRegistrationStatus.CONFIRMED and result_of_team_registration.payment_status == TeamRegistrationPaymentStatus.PAID:
                 return JSONResponse(
                     status_code=200,
