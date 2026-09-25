@@ -1,3 +1,4 @@
+from db.models.admin_states import AdminStats
 from db.models.audit_log import AuditLog
 from db.models.auth import (
     EmailVerificationStatus,
@@ -34,6 +35,7 @@ from db.models.team_registration import (
 from db.models.webhook_events import WebhookEvent
 
 __all__ = [
+    "AdminStats",
     "AuditLog",
     "EmailVerificationStatus",
     "Event",

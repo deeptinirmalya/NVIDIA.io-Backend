@@ -23,7 +23,7 @@ from utils import auth_util, util
 from templates import email_templates 
 
 
-from .schemas import UserLogin, UserRegister
+from .schemas import AdminRegister, UserLogin, UserRegister
 from core.config import settings
 from monitoring.posthog import posthog
 
@@ -54,6 +54,9 @@ if not firebase_admin._apps:
 
 
 auth_router = APIRouter()
+
+
+
 
 async def verify_turnstile(request: Request, token) -> bool:
 
@@ -347,6 +350,46 @@ async def google(
 
 # ==============================================================================================================================
 
+
+@auth_router.post("/admin-register", status_code=status.HTTP_201_CREATED)
+async def register_admin(
+    data: AdminRegister,
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        stmt = select(User).where(User.email == data.email)
+        existing_user = (await db.execute(stmt)).scalar_one_or_none()
+        if existing_user:
+            raise HTTPException(status_code=409, detail="Email already registered")
+
+        is_valid, message = auth_util.validate_password(data.password)
+        if not is_valid:
+            raise HTTPException(status_code=422, detail=message)
+
+        admin = User(
+            email=data.email,
+            password_hash=auth_util.hash_password(data.password),
+            role=UserRole.ADMIN,
+            created_at=auth_util.get_now_utc(),
+        )
+        db.add(admin)
+        await db.commit()
+        return JSONResponse(
+            status_code=201,
+            content={
+                "success": True,
+                "message": "Register success full",
+                "data": None,
+                "error": None
+            }
+        )
+
+    except HTTPException as httpe:
+        raise httpe
+    except Exception as e:
+        logger.exception("Exception during admin register", extra={"email": data.email})
+        raise HTTPException(status_code=500, detail="Internal Serevr error")
+
 @auth_router.post(
     "/admin-login", 
     dependencies=[Depends(rate_limiter(max_tokens=5, refill_rate=0.1, mode="login"))]
@@ -357,20 +400,19 @@ async def login(
     client=Depends(security.get_client_info),
     session: AsyncSession = Depends(get_db)
 ):
-    pass
-    verify_user = await verify_turnstile(request, data)
+    verify_user = await verify_turnstile(request, data.cf_turnstile_response)
     if not verify_user:
         raise HTTPException(status_code=403, detail="Bot Detected")
 
     stmt = select(User).where(User.email == data.identifier)
     user = (await session.execute(stmt)).scalar_one_or_none()
     
-    DUMMY_HASH = "$2b$12$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36XVyXm5WjjHyuBxmIdF4Ku"
+    DUMMY_HASH = "$argon2id$v=19$m=16384,t=3,p=2$cyTVMDHybhjGT2tIeJJZQQ$3Run/GbdCIXQoKBFldHUQzVX31aQ/iDBTMc6/J6Bp4I"
     target_hash = user.password_hash if user else DUMMY_HASH
     password_is_correct = auth_util.verify_password(data.password, target_hash)
     
     if not user or not password_is_correct:
-        print(f"invalid details {data.identifier} || {data.password}")
+        logger.warning("Admin login failed: invalid credentials")
         posthog.capture(distinct_id=data.identifier, event="user_login_failed", properties={"reason": "invalid_credentials"})
         return JSONResponse(
             status_code=401,

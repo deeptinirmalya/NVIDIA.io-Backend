@@ -1,4 +1,5 @@
 import base64
+import asyncio
 import uuid
 import httpx
 import logging
@@ -57,6 +58,7 @@ from monitoring.posthog import posthog
 logger = logging.getLogger("event")
 
 event_router = APIRouter()
+_catalogs_cache_lock = asyncio.Lock()
 
 
 
@@ -74,43 +76,36 @@ async def view_events(
     try:
         cached = await get_value(cache_key)
 
-        if cached is not None:
-            return JSONResponse(
-                    status_code=200,
-                    content={
-                        "success": True,
-                        "message": "Events retrieved successfully",
-                        "data": cached,
-                        "error": None,
-                    }
-                )
+        if cached is None:
+            async with _catalogs_cache_lock:
+                cached = await get_value(cache_key)
 
-        events_query = (
-            select(
-                Event.id,
-                Event.name,
-                cast(Event.category, String).label("category"),
-                cast(Event.gender_type, String).label("gender_type"),
-                cast(Event.participation_type, String).label("participation_type"),
-                Event.banner_url
-                )
-            .where(Event.status != EventStatus.DRAFT)
-            .order_by(Event.created_at.desc(), Event.id.desc()))
+                if cached is None:
+                    events_query = (
+                        select(
+                            Event.id,
+                            Event.name,
+                            cast(Event.category, String).label("category"),
+                            cast(Event.gender_type, String).label("gender_type"),
+                            cast(Event.participation_type, String).label("participation_type"),
+                            Event.banner_url,
+                        )
+                        .where(Event.status != EventStatus.DRAFT)
+                        .order_by(Event.created_at.desc(), Event.id.desc())
+                    )
 
-        result = await db.execute(events_query)
-
-        events_data = list(map(dict, result.mappings().all(),))
-        
-        await set_value(cache_key, events_data, expire=7200)
+                    result = await db.execute(events_query)
+                    cached = list(map(dict, result.mappings().all()))
+                    await set_value(cache_key, cached, expire=7200)
 
         return JSONResponse(
             status_code=200,
             content={
                 "success": True,
                 "message": "Events retrieved successfully",
-                "data": events_data,
+                "data": cached,
                 "error": None,
-            }
+            },
         )
 
     except Exception:
@@ -118,26 +113,25 @@ async def view_events(
         raise HTTPException(status_code=500, detail="Failed to retrieve events")
 
 
-@event_router.delete("/catalogs/cache")
-async def clear_events_cache(
-    # _user_data: dict = Depends(token_required(allowed_roles=["ADMIN", "SUPERADMIN"])),
-    _=Depends(rate_limiter(max_tokens=5, refill_rate=0.5, mode="both")),
-):
-    try:
-        await delete_value("all_events:summary")
+# @event_router.delete("/catalogs/cache")
+# async def clear_events_cache(
+#     _=Depends(rate_limiter(max_tokens=5, refill_rate=0.5, mode="both")),
+# ):
+#     try:
+#         await delete_value("all_events:summary")
 
-        return JSONResponse(
-            status_code=200,
-            content={
-                "success": True,
-                "message": "Events cache cleared successfully",
-                "data": None,
-                "error": None,
-            },
-        )
-    except Exception:
-        logger.exception("Error while clearing events cache")
-        raise HTTPException(status_code=500, detail="Failed to clear events cache")
+#         return JSONResponse(
+#             status_code=200,
+#             content={
+#                 "success": True,
+#                 "message": "Events cache cleared successfully",
+#                 "data": None,
+#                 "error": None,
+#             },
+#         )
+#     except Exception:
+#         logger.exception("Error while clearing events cache")
+#         raise HTTPException(status_code=500, detail="Failed to clear events cache")
 
 
 
