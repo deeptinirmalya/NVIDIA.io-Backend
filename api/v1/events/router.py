@@ -44,6 +44,7 @@ from security.auth import get_client_info, token_required
 from utils import auth_util, util
 from templates import email_templates 
 from engine.cache import get_value, set_value, delete_value
+from engine.bloomfilter import event_id_exists_in_bloom
 
 
 from services.razorpay_client import razorpay_client
@@ -145,6 +146,11 @@ async def get_event_details(
 ):
     cache_key = f"event_{event_id}_details"
     try:
+        bloom_exists = await event_id_exists_in_bloom(event_id)
+        if not bloom_exists:
+            logger.warning("Event id rejected by bloom filter", extra={"event_id": event_id})
+            raise HTTPException(status_code=404, detail="No event found")
+
         data = await get_value(cache_key)
 
         if not data or data is None:
@@ -156,7 +162,6 @@ async def get_event_details(
                 raise HTTPException(status_code=404, detail="No event found")
 
             event_details = EventResponse.model_validate(event_result).model_dump(mode="json")
-            
             await set_value(cache_key, event_details, expire=3600)
 
             return JSONResponse(

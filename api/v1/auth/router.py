@@ -22,8 +22,10 @@ from security.auth import get_client_info
 from utils import auth_util, util
 from templates import email_templates 
 
+import services.count_service as cServices
 
-from .schemas import AdminRegister, UserLogin, UserRegister
+
+from .schemas import AdminLogin
 from core.config import settings
 from monitoring.posthog import posthog
 
@@ -312,6 +314,9 @@ async def google(
 
 
         await db.commit()
+
+        await cServices.increase_student_count(db)
+
         logger.info("Signup db initialization is complete", extra={"email": email})
 
         response = JSONResponse(
@@ -351,44 +356,6 @@ async def google(
 # ==============================================================================================================================
 
 
-@auth_router.post("/admin-register", status_code=status.HTTP_201_CREATED)
-async def register_admin(
-    data: AdminRegister,
-    db: AsyncSession = Depends(get_db),
-):
-    try:
-        stmt = select(User).where(User.email == data.email)
-        existing_user = (await db.execute(stmt)).scalar_one_or_none()
-        if existing_user:
-            raise HTTPException(status_code=409, detail="Email already registered")
-
-        is_valid, message = auth_util.validate_password(data.password)
-        if not is_valid:
-            raise HTTPException(status_code=422, detail=message)
-
-        admin = User(
-            email=data.email,
-            password_hash=auth_util.hash_password(data.password),
-            role=UserRole.ADMIN,
-            created_at=auth_util.get_now_utc(),
-        )
-        db.add(admin)
-        await db.commit()
-        return JSONResponse(
-            status_code=201,
-            content={
-                "success": True,
-                "message": "Register success full",
-                "data": None,
-                "error": None
-            }
-        )
-
-    except HTTPException as httpe:
-        raise httpe
-    except Exception as e:
-        logger.exception("Exception during admin register", extra={"email": data.email})
-        raise HTTPException(status_code=500, detail="Internal Serevr error")
 
 @auth_router.post(
     "/admin-login", 
@@ -396,7 +363,7 @@ async def register_admin(
 )
 async def login(
     request: Request,
-    data: UserLogin, 
+    data: AdminLogin, 
     client=Depends(security.get_client_info),
     session: AsyncSession = Depends(get_db)
 ):

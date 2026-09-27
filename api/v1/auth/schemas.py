@@ -20,12 +20,10 @@ class UserRegister(BaseModel):
         return value
 
 
-class AdminRegister(BaseModel):
-    email: EmailStr = Field(..., description="The admin's email address")
-    password: str = Field(..., min_length=8, description="The admin's plain-text password")
 
 
-class UserLogin(BaseModel):
+
+class AdminLogin(BaseModel):
     identifier: EmailStr = Field(..., description="The user's email address ")
     password: str = Field(..., min_length=8, description="The user's plain-text password")
     cf_turnstile_response: str = Field(...)

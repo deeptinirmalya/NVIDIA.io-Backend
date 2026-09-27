@@ -34,6 +34,12 @@ class AdminStats(Base):
         server_default="0",
     )
 
+    total_blocked_user: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        server_default="0",
+    )
+
     total_events: Mapped[int] = mapped_column(
         Integer,
         nullable=False,

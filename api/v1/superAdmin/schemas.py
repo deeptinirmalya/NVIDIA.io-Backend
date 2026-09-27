@@ -1,6 +1,7 @@
 from datetime import datetime
 from enum import Enum
 
+from pydantic import BaseModel, EmailStr, Field
 from pydantic import BaseModel, Field, model_validator, ConfigDict
 
 
@@ -232,8 +233,11 @@ class EventAdminResponse(BaseModel):
 
 
 
-from pydantic import BaseModel, EmailStr, Field
 
+
+class AdminRegister(BaseModel):
+    email: EmailStr = Field(..., description="The admin's email address")
+    password: str = Field(..., min_length=8, description="The admin's plain-text password")
 
 class NewSuperAdminRequest(BaseModel):
     email: EmailStr

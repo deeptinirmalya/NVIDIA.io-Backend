@@ -18,6 +18,7 @@ from ..schemas import EventAdminResponse, EventCreate, EventUpdate
 from core.config import settings
 from monitoring.posthog import posthog
 from engine.cache import delete_value
+from engine.bloomfilter import add_event_id_to_bloom
 
 from db.models.event import (
     Event,
@@ -25,6 +26,8 @@ from db.models.event import (
     EventStatus
 )
 
+from services.auditlog_service import create_audit_log
+from services.count_service import increase_event_count
 
 logger = logging.getLogger("Super-admin-Event")
 
@@ -73,8 +76,9 @@ def validate_banner(base64_image: str):
 @superadmin_event_router.post("/add-event")
 async def create_event(
     event_data: EventCreate,
+    request: Request,
     db: AsyncSession = Depends(get_db),
-    # user_data: dict = Depends(token_required(allowed_roles=["SUPERADMIN"])),
+    user_data: dict = Depends(token_required(allowed_roles=["SUPERADMIN"])),
     _=Depends(rate_limiter(max_tokens=5, refill_rate=0.25, mode="both"))
 ):
     try:
@@ -104,6 +108,26 @@ async def create_event(
 
         db.add(new_event)
         await db.commit()
+        await db.refresh(new_event)
+
+        await increase_event_count(
+            db,
+            event_type=event_data.participation_type.value.lower(),
+            is_paid=event_data.is_paid,
+        )
+        await add_event_id_to_bloom(new_event.id)
+
+        await create_audit_log(
+            request=request,
+            user_id=user_data["user_id"],
+            action="EVENT_ADDED",
+            entity_type="EVENT",
+            entity_id=None,
+            description="Event status added by superadmin",
+            metadata={
+                "new_status": event_data,
+            },
+        )
 
         return JSONResponse(
             status_code=201,
@@ -157,6 +181,7 @@ async def get_event_for_editing(
 @superadmin_event_router.put("/update-event/{event_id}")
 async def update_event(
     event_id: int,
+    request: Request,
     event_data: EventUpdate,
     db: AsyncSession = Depends(get_db),
     user_data: dict = Depends(token_required(allowed_roles=["SUPERADMIN"])),
@@ -205,6 +230,18 @@ async def update_event(
         await delete_value("all_events:summary")
         await delete_value(f"event_{event_id}_details")
 
+        await create_audit_log(
+            request=request,
+            user_id=user_data["user_id"],
+            action="EVENY_UPDATE",
+            entity_type="EVENT",
+            entity_id=event_id,
+            description="Event updated by superadmin",
+            metadata={
+                "new_status": event_data,
+            },
+        )
+
         return JSONResponse(
             status_code=200,
             content={
@@ -221,3 +258,68 @@ async def update_event(
         await db.rollback()
         logger.exception("Exception during event update", extra={"event_id": event_id, "error": str(exc)})
         raise HTTPException(status_code=500, detail="Unable to update event")
+
+
+@superadmin_event_router.patch("/update-event-status/{event_id}/{status}")
+async def update_event_status(
+    event_id: int,
+    status: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    user_data: dict = Depends(token_required(allowed_roles=["SUPERADMIN"])),
+    _ = Depends(rate_limiter(max_tokens=7, refill_rate=0.5, mode="both"))
+):
+    user_id = user_data["user_id"]
+    normalized_status = status.upper()
+    valid_statuses = {EventStatus.DRAFT, EventStatus.PUBLISHED, EventStatus.CANCELLED, EventStatus.COMPLETED, EventStatus.ONGOING, EventStatus.REGISTRATION_CLOSED}
+
+    if normalized_status not in valid_statuses:
+        logger.warning("invalid status type in status update", extra={"admin_id": user_id})
+        raise HTTPException(status_code=422, detail="Invalid Status Type")
+
+    try:
+        result = await db.execute(
+            update(Event)
+            .where(Event.id == event_id)
+            .values(status=EventStatus(normalized_status))
+        )
+
+        if result.rowcount == 0:
+            raise HTTPException(status_code=404, detail="No event found")
+
+        await delete_value("all_events:summary")
+
+        await db.commit()
+
+        await create_audit_log(
+            request=request,
+            user_id=user_id,
+            action="UPDATE_STATUS",
+            entity_type="EVENT",
+            entity_id=event_id,
+            description="Event status updated by admin",
+            metadata={
+                "new_status": normalized_status,
+            },
+        )
+
+        return JSONResponse(
+            status_code=200,
+            content={
+                "success": True,
+                "message": "Event updated successfully",
+                "data": None,
+                "error": None,
+            },
+        )
+
+    except HTTPException as httpe:
+        await db.rollback()
+        raise httpe
+    except Exception as e:
+        await db.rollback()
+        logger.exception(
+            "exception during event status update",
+            extra={"admin_id": user_id, "error": str(e)},
+        )
+        raise HTTPException(status_code=500, detail="Internal Server Error")

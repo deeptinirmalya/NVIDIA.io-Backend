@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from security.auth import token_required
 from security.rate_limiter import rate_limiter
 from db.session import get_db
+from engine.cache import delete_value
 
 from services.auditlog_service import create_audit_log
 
@@ -166,6 +167,8 @@ async def update_event_status(
 
         if result.rowcount == 0:
             raise HTTPException(status_code=404, detail="No event found")
+
+        await delete_value("all_events:summary")
 
         await db.commit()
 

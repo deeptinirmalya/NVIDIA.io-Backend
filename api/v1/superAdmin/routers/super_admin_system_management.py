@@ -32,11 +32,11 @@ REASON_TO_REQUEST_CODE = ["NEW_SUPER_ADMIN_ADD"]
 async def request_code_to_moderator(
     reason: str,
     db : AsyncSession = Depends(get_db),
-    # user_data: dict = Depends(token_required(allowed_roles=["SUPERADMIN"])),
+    user_data: dict = Depends(token_required(allowed_roles=["SUPERADMIN"])),
     _ = Depends(rate_limiter(max_tokens=2, refill_rate=0.1, mode="both"))
 ):
-    user_id = 1
-    # user_id = user_data["user_id"]
+    # user_id = 1
+    user_id = user_data["user_id"]
     try:
         if reason.upper() not in REASON_TO_REQUEST_CODE:
             raise HTTPException(status_code=404, detail="Invalid reason to request code")
