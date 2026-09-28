@@ -90,7 +90,7 @@ class PaymentCrudServices:
                     .values(
                         status=PaymentStatus.FAILED,
                         failure_reason="Razorpay order creation failed",
-                        updated_at=auth_util.get_now_utc(),
+                        failed_at=auth_util.get_now_utc(),
                     )
                 )
                 await db.execute(
@@ -117,7 +117,6 @@ class PaymentCrudServices:
                 .where(Payment.id == new_starter_entry.id)
                 .values(
                     razorpay_order_id=order_id,
-                    updated_at=auth_util.get_now_utc(),
                 )
             )
             await db.execute(update_stmt)
@@ -194,7 +193,7 @@ class PaymentCrudServices:
                     .values(
                         status=PaymentStatus.FAILED,
                         failure_reason="Razorpay order creation failed",
-                        updated_at=auth_util.get_now_utc(),
+                        failed_at=auth_util.get_now_utc(),
                     )
                 )
                 await db.execute(
@@ -215,7 +214,6 @@ class PaymentCrudServices:
                 .where(Payment.id == new_starter_entry.id)
                 .values(
                     razorpay_order_id=order_id,
-                    updated_at=auth_util.get_now_utc(),
                 )
             )
             await db.execute(update_stmt)
@@ -258,6 +256,7 @@ class PaymentCrudServices:
             db_result.razorpay_signature = data.razorpay_signature
             db_result.first_came = FirstCame.FRONTEND
             db_result.signature_verified = True
+            db_result.process_at = auth_util.get_now_utc()
 
             await db.commit()
             return JSONResponse(

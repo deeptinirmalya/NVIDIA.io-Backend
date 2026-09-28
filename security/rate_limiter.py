@@ -65,8 +65,10 @@ def rate_limiter(
     *,
     on_block: Optional[Callable[[Request, str], Awaitable[None]]] = None,
 ) -> Callable[[Request], Awaitable[None]]:
-    if mode not in {"ip", "user", "both", "login"}:
-        raise ValueError(f'Invalid mode="{mode}". Expected one of ip,user,both,login.')
+    if mode not in {"ip", "user", "both", "login", "superadmin-login"}:
+        raise ValueError(
+            f'Invalid mode="{mode}". Expected one of ip,user,both,login,superadmin-login.'
+        )
 
     async def limiter(request: Request) -> None:
 
@@ -83,7 +85,7 @@ def rate_limiter(
 
         client_ip = get_client_ip(request)
 
-        if mode in ("ip", "both", "login"):
+        if mode in ("ip", "both", "login", "superadmin-login"):
             keys.append(f"rate:ip:{client_ip}")
 
         if mode in ("user", "both") and hasattr(request.state, "user"):
@@ -94,6 +96,9 @@ def rate_limiter(
 
         if mode == "login" and request.method == "POST":
             keys.append(f"rate:login_ip:{client_ip}")
+
+        if mode == "superadmin-login" and request.method == "POST":
+            keys.append(f"rate:superadmin_login_ip:{client_ip}")
 
         if not keys:
             keys.append(f"rate:ip:{client_ip}")

@@ -192,7 +192,8 @@ async def razorpay_webhook(
                         ])
                     )
                     .values(
-                        status=PaymentStatus.SUCCESS
+                        status=PaymentStatus.SUCCESS,
+                        paid_at=auth_util.get_now_utc()
                     )
                 )
 
@@ -329,7 +330,8 @@ async def razorpay_webhook(
                     .values(
                         status=PaymentStatus.FAILED,
                         gateway_error_code=error_code,
-                        failure_reason=failure_reason
+                        failure_reason=failure_reason,
+                        failed_at=auth_util.get_now_utc()
                     )
                 )
 

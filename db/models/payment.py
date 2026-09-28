@@ -184,3 +184,16 @@ class Payment(Base):
         DateTime,
         nullable=True,
     )
+
+    process_at: Mapped[datetime | None] = mapped_column(
+        DateTime,
+        nullable=True,
+    )
+    failed_at: Mapped[datetime | None] = mapped_column(
+        DateTime,
+        nullable=True,
+    )
+    refund_at: Mapped[datetime | None] = mapped_column(
+        DateTime,
+        nullable=True,
+    )

@@ -28,6 +28,12 @@ class AdminLogin(BaseModel):
     password: str = Field(..., min_length=8, description="The user's plain-text password")
     cf_turnstile_response: str = Field(...)
 
+class SuperAdminLogin(BaseModel):
+    email: EmailStr = Field(..., description="The email address ")
+    password: str = Field(..., min_length=8, description="The password")
+    otp: str = Field(..., pattern=r"^\d{6}$", description="The six-digit OTP")
+    cf_turnstile_response: str = Field(...)
+
 
 
 

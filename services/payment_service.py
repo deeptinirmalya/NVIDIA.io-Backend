@@ -20,7 +20,7 @@ from services.razorpay_client import razorpay_client
 
 from engine.cache import acquire_payment_lock, release_payment_lock
 from core.config import settings
-from utils import util
+from utils import util, auth_util
 
 
 logger = logging.getLogger("payment_service")
@@ -282,6 +282,7 @@ class PaymentServices:
                     db_result.razorpay_payment_id = data.razorpay_payment_id
                     db_result.razorpay_signature = data.razorpay_signature
                     db_result.signature_verified = True
+
 
                     await db.commit()
 

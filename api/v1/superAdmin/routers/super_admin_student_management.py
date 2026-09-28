@@ -199,37 +199,69 @@ async def add_super_admin(
 
 
 
-@superadmin_student_management_router.get("/student{roll_number}/details")
+@superadmin_student_management_router.get("/student-details")
 async def get_student_participations_by_roll_number(
-    roll_number: str,
     request: Request,
     db: AsyncSession = Depends(get_db),
     user_data: dict = Depends(token_required(allowed_roles=["SUPERADMIN"])),
+    roll_number: str | None = Query(default=None, description="Student roll number"),
+    user_id: int | None = Query(default=None, description="Student user id"),
     _ = Depends(rate_limiter(max_tokens=10, refill_rate=0.5, mode="both")),
 ):
     try:
-        student_roll = roll_number.strip().upper()
-        student_user_id = (
+        if roll_number is None and user_id is None:
+            raise HTTPException(status_code=400,detail="Provide either roll number or user id")
+
+        if roll_number is not None and user_id is not None:
+            raise HTTPException(status_code=400,detail="Provide either roll_number or user_id, not both")
+
+        student_roll = None
+        student_profile = None
+
+        if roll_number is not None:
+            student_roll = roll_number.strip().upper()
+            student_profile = (
+                await db.execute(
+                    select(Profile.user_id, Profile.name, Profile.roll_no).where(
+                        Profile.roll_no == student_roll
+                    )
+                )
+            ).mappings().one_or_none()
+        else:
+            student_profile = (
+                await db.execute(
+                    select(Profile.user_id, Profile.name, Profile.roll_no).where(
+                        Profile.user_id == user_id
+                    )
+                )
+            ).mappings().one_or_none()
+
+        if student_profile is None:
+            if roll_number is not None:
+                raise HTTPException(status_code=404, detail="Student not found with this roll number")
+            raise HTTPException(status_code=404, detail="Student profile not found for this user id")
+
+        student_user_id = student_profile["user_id"]
+        student_roll = student_profile["roll_no"] or student_roll
+        student_name = student_profile["name"]
+
+        student_detail = (
             await db.execute(
-                select(Profile.user_id).where(Profile.roll_no == student_roll)
-            )
-        ).scalar_one_or_none()
-
-        if student_user_id is None:
-            raise HTTPException(status_code=404, detail="Student not found with this roll number")
-
-        student_detail =(await db.execute(
-                select(User).where(Profile.user_id == student_user_id)
+                select(User).where(
+                    User.id == student_user_id,
+                    User.role == UserRole.STUDENT,
+                )
             )
         ).scalar_one_or_none()
         if student_detail is None:
-            raise HTTPException(status_code=404, detail="Student detail not found with this roll number")
+            raise HTTPException(status_code=404, detail="Student detail not found")
 
         single_rows = (
             await db.execute(
                 select(
                     SingleRegistration.id.label("participation_id"),
                     Event.name.label("event_name"),
+                    Event.participation_type.label("participation_type"),
                     SingleRegistration.created_at.label("joined_date"),
                     SingleRegistration.status.label("status"),
                     SingleRegistration.payment_status.label("payment_status"),
@@ -246,6 +278,7 @@ async def get_student_participations_by_roll_number(
                     TeamRegistration.id.label("participation_id"),
                     TeamRegistration.team_name,
                     Event.name.label("event_name"),
+                    Event.participation_type.label("participation_type"),
                     TeamMember.created_at.label("joined_date"),
                     TeamRegistration.status.label("status"),
                     TeamRegistration.payment_status.label("payment_status"),
@@ -264,6 +297,7 @@ async def get_student_participations_by_roll_number(
             {
                 "participation_id": row["participation_id"],
                 "event_name": row["event_name"],
+                "participation_type": row["participation_type"],
                 "joined_date": row["joined_date"].isoformat() if row["joined_date"] else None,
                 "status": row["status"].value,
                 "payment_status": row["payment_status"].value,
@@ -276,6 +310,7 @@ async def get_student_participations_by_roll_number(
                 "participation_id": row["participation_id"],
                 "team_name": row["team_name"],
                 "event_name": row["event_name"],
+                "participation_type": row["participation_type"],
                 "joined_date": row["joined_date"].isoformat() if row["joined_date"] else None,
                 "status": row["status"].value,
                 "payment_status": row["payment_status"].value,
@@ -289,8 +324,8 @@ async def get_student_participations_by_roll_number(
             action="VIEW_STUDENT_PARTICIPATIONS",
             entity_type="USER",
             entity_id=student_user_id,
-            description="Student participation report fetched by roll number",
-            metadata={"roll_number": student_roll},
+            description="Student participation report fetched by roll number or user id",
+            metadata={"roll_number": student_roll, "user_id": student_user_id},
         )
 
         return JSONResponse(
@@ -300,11 +335,17 @@ async def get_student_participations_by_roll_number(
                 "message": "Student participation details retrieved successfully",
                 "data": {
                     "student_detail": {
+                        "user_id": student_user_id,
                         "roll_no": student_roll,
+                        "name": student_name,
                         "email": student_detail.email,
                         "status": student_detail.status,
-                        "last_login": student_detail.last_login,
-                        "created_at": student_detail.created_at
+                        "last_login": (
+                            student_detail.last_login.isoformat()
+                            if student_detail.last_login
+                            else None
+                        ),
+                        "created_at": student_detail.created_at.isoformat(),
                     },
                     "single_participation": formatted_single,
                     "team_participation": formatted_team,
@@ -317,7 +358,12 @@ async def get_student_participations_by_roll_number(
     except Exception as e:
         logger.exception(
             "Exception during student participation fetch",
-            extra={"roll_number": roll_number, "admin_id": user_data["user_id"], "error": str(e)},
+            extra={
+                "roll_number": roll_number,
+                "user_id": user_id,
+                "admin_id": user_data["user_id"],
+                "error": str(e),
+            },
         )
         raise HTTPException(status_code=500, detail="Internal server error")
 

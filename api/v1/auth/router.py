@@ -14,7 +14,7 @@ import re
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update, desc, asc
 
-from db.models.auth import User, LoginHistory, TokenBlacklist, UserStatus, UserRole, Profile
+from db.models.auth import User, LoginHistory, TokenBlacklist, UserStatus, UserRole, Profile, SuperAdminTotp
 from db.session import get_db
 from security import auth as security
 from security.rate_limiter import rate_limiter
@@ -25,7 +25,7 @@ from templates import email_templates
 import services.count_service as cServices
 
 
-from .schemas import AdminLogin
+from .schemas import AdminLogin, SuperAdminLogin
 from core.config import settings
 from monitoring.posthog import posthog
 
@@ -361,7 +361,7 @@ async def google(
     "/admin-login", 
     dependencies=[Depends(rate_limiter(max_tokens=5, refill_rate=0.1, mode="login"))]
 )
-async def login(
+async def admin_login(
     request: Request,
     data: AdminLogin, 
     client=Depends(security.get_client_info),
@@ -494,9 +494,155 @@ async def login(
     return response
 
 
-@auth_router.post("/super-admin-login")
-async def super_admin_login():
-    pass
+@auth_router.post(
+    "/superadmin-login", 
+    dependencies=[Depends(rate_limiter(max_tokens=5, refill_rate=0.1, mode="superadmin-login"))]
+)
+async def superadmin_login(
+    request: Request,
+    data: SuperAdminLogin, 
+    client=Depends(security.get_client_info),
+    session: AsyncSession = Depends(get_db)
+):
+    verify_user = await verify_turnstile(request, data.cf_turnstile_response)
+    if not verify_user:
+        raise HTTPException(status_code=403, detail="Bot Detected")
+
+    stmt = select(User).where(User.email == data.email, User.role == UserRole.SUPERADMIN)
+    user = (await session.execute(stmt)).scalar_one_or_none()
+    
+    DUMMY_HASH = "$argon2id$v=19$m=16384,t=3,p=2$cyTVMDHybhjGT2tIeJJZQQ$3Run/GbdCIXQoKBFldHUQzVX31aQ/iDBTMc6/J6Bp4I"
+    target_hash = user.password_hash if user else DUMMY_HASH
+    password_is_correct = auth_util.verify_password(data.password, target_hash)
+    
+    if not user or not password_is_correct:
+        logger.warning("Admin login failed: invalid credentials")
+        try:
+            posthog.capture(distinct_id=data.email, event="user_login_failed", properties={"reason": "invalid_credentials"})
+        except Exception:
+            logger.exception("Failed to record superadmin login failure")
+        return JSONResponse(
+            status_code=401,
+            content={
+                "success": False,
+                "message": "Invalid credentials",
+                "data": None,
+                "error": "INVALID_CREDENTIALS"
+            }
+        )
+
+    if user.status == UserStatus.INACTIVE:
+        print("user still pending")
+        return JSONResponse(
+            status_code=401,
+            content={
+                "success": False,
+                "message": "Account not verified",
+                "data": None,
+                "error": "ACCOUNT_NOT_VERIFIED"
+            }
+        )
+
+    if user.status != UserStatus.ACTIVE:
+        raise HTTPException(
+            status_code=403,
+            detail="Account is blocked"
+        )
+
+    if not user.is_verified:
+        raise HTTPException(status_code=401, detail="Account is not verified")
+
+    totp_detail = (await session.execute(
+        select(SuperAdminTotp.secret_key).where(SuperAdminTotp.user_id == user.id)
+    )).scalar_one_or_none()
+
+    if totp_detail is None:
+        raise HTTPException(status_code=404, detail="2Fa not found contact Deepti")
+
+    verified_otp = await auth_util.verify_totp(totp_detail, data.otp)
+    if not verified_otp:
+        raise HTTPException(status_code=409, detail="Invalid OTP")
+
+    stmt_history = select(LoginHistory).where(LoginHistory.user_id == user.id).order_by(desc(LoginHistory.login_at)).limit(10)
+    login_history = (await session.execute(stmt_history)).scalars().all()
+
+    history_dicts = [{"ip_address": h.ip_address, "country": h.country, "user_agent": h.user_agent, "login_at": h.login_at} for h in login_history]
+    
+    risk = auth_util.calculate_risk(client, history_dicts)
+    
+    try:
+        now = auth_util.get_now_utc()
+
+        new_history = LoginHistory(
+            user_id=user.id,
+            ip_address=client["ip"],
+            user_agent=client["user_agent"],
+            country=client["country"],
+            risk_score=risk,
+            login_at=now
+        )
+        session.add(new_history)
+        
+        if risk >= 100:
+            await session.commit()  
+            return JSONResponse(
+                status_code=403,
+                content={
+                    "success": False,
+                    "message": "Login denied due to a high-risk sign-in attempt.",
+                    "data": None,
+                    "error": "HIGH_RISK_DETECTED"
+                }
+            )
+
+        user.last_login = now
+
+        jti = str(uuid.uuid4())
+        fingerprint = auth_util.generate_fingerprint(client["ip"], client["user_agent"])
+        
+        access_token = security.create_access_token(
+            str(user.id), 
+            user.role.value, 
+            user.status.value, 
+            jti, 
+            fingerprint, 
+            user.token_version
+        )
+
+        await session.commit()
+        logger.info("Login DB commit successful", extra={"user_id": str(user.id)})
+
+    except Exception as e:
+        await session.rollback()
+        logger.exception("Database error during login", exc_info=e)
+        raise HTTPException(status_code=500, detail="Database error during login")
+
+    try:
+        posthog.capture(distinct_id=data.email, event="user_logged_in", properties={"role": user.role.value})
+    except Exception:
+        logger.exception("Failed to record superadmin login success", extra={"user_id": user.id})
+
+    response = JSONResponse(
+        status_code=200, 
+        content={
+            "success": True,
+            "message": "Logged in successfully",
+            "data": {"role": user.role.value},
+            "errors": None
+        }
+    )
+    
+    cookie_params = {
+        "httponly": True,
+        "secure": settings.COOKIE_SECURE,
+        "samesite": settings.COOKIE_SAMESITE,
+        "path": "/"
+    }
+
+    response.set_cookie(settings.ACCESS_TOKEN_COOKIE_NAME, access_token, max_age= 2 * 60 * 60, **cookie_params)
+    
+    return response
+
 
 
 
