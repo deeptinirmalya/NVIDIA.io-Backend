@@ -137,7 +137,7 @@ async def view_events(
 
 
 
-@event_router.get("/view/{event_id}/details")
+@event_router.get("/view/{event_id:int}/details")
 async def get_event_details(
     event_id: int,
     db: AsyncSession = Depends(get_db),

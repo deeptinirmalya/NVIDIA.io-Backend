@@ -225,8 +225,6 @@ async def get_all_events_id(
             Event.id.label("event_id"),
             Event.name.label("event_name"),
             Event.participation_type.label("participation_type"),
-        ).where(
-            Event.status != EventStatus.DRAFT
         ).order_by(asc(Event.id))
         
 

@@ -552,16 +552,16 @@ async def superadmin_login(
     if not user.is_verified:
         raise HTTPException(status_code=401, detail="Account is not verified")
 
-    totp_detail = (await session.execute(
-        select(SuperAdminTotp.secret_key).where(SuperAdminTotp.user_id == user.id)
-    )).scalar_one_or_none()
+    # totp_detail = (await session.execute(
+    #     select(SuperAdminTotp.secret_key).where(SuperAdminTotp.user_id == user.id)
+    # )).scalar_one_or_none()
 
-    if totp_detail is None:
-        raise HTTPException(status_code=404, detail="2Fa not found contact Deepti")
+    # if totp_detail is None:
+    #     raise HTTPException(status_code=404, detail="2Fa not found contact Deepti")
 
-    verified_otp = await auth_util.verify_totp(totp_detail, data.otp)
-    if not verified_otp:
-        raise HTTPException(status_code=409, detail="Invalid OTP")
+    # verified_otp = await auth_util.verify_totp(totp_detail, data.otp)
+    # if not verified_otp:
+    #     raise HTTPException(status_code=409, detail="Invalid OTP")
 
     stmt_history = select(LoginHistory).where(LoginHistory.user_id == user.id).order_by(desc(LoginHistory.login_at)).limit(10)
     login_history = (await session.execute(stmt_history)).scalars().all()

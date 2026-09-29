@@ -233,7 +233,32 @@ class EventAdminResponse(BaseModel):
 
 
 
+class EventResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
 
+    id: int
+    name: str
+    about: str | None
+    rules: str | None
+    venue: str | None
+
+    registration_start_time: datetime
+    registration_end_time: datetime | None
+
+    event_start_time: datetime | None
+    event_end_time: datetime | None
+
+    status: EventStatus
+    participation_type: ParticipationType
+    category: EventCategory
+    gender_type: GenderType
+
+    is_paid: bool
+    price: int
+
+
+    min_team_size: int | None
+    max_team_size: int | None
 
 class AdminRegister(BaseModel):
     email: EmailStr = Field(..., description="The admin's email address")

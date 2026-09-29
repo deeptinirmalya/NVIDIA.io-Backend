@@ -76,7 +76,7 @@ async def get_student_participations_by_roll_number(
             student_roll = roll_number.strip().upper()
             student_profile = (
                 await db.execute(
-                    select(Profile.user_id, Profile.name, Profile.roll_no).where(
+                    select(Profile.user_id, Profile.name, Profile.roll_no, Profile.contact_no).where(
                         Profile.roll_no == student_roll
                     )
                 )
@@ -84,7 +84,7 @@ async def get_student_participations_by_roll_number(
         else:
             student_profile = (
                 await db.execute(
-                    select(Profile.user_id, Profile.name, Profile.roll_no).where(
+                    select(Profile.user_id, Profile.name, Profile.roll_no, Profile.contact_no).where(
                         Profile.user_id == user_id
                     )
                 )
@@ -98,6 +98,7 @@ async def get_student_participations_by_roll_number(
         student_user_id = student_profile["user_id"]
         student_roll = student_profile["roll_no"] or student_roll
         student_name = student_profile["name"]
+        student_contact_no = student_profile["contact_no"]
 
         student_detail = (
             await db.execute(
@@ -192,6 +193,7 @@ async def get_student_participations_by_roll_number(
                         "user_id": student_user_id,
                         "roll_no": student_roll,
                         "name": student_name,
+                        "contact_no": student_contact_no,
                         "email": student_detail.email,
                         "status": student_detail.status,
                         "last_login": (
@@ -222,7 +224,7 @@ async def get_student_participations_by_roll_number(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@superadmin_student_management_router.patch("/block-user/{user_id}")
+@superadmin_student_management_router.patch("/block-student/{user_id}")
 async def block_user(
     user_id: int,
     request: Request,
@@ -236,7 +238,7 @@ async def block_user(
                 select(User)
                 .where(
                     User.id == user_id,
-                    User.role.in_([UserRole.ADMIN, UserRole.STUDENT]),
+                    User.role == UserRole.STUDENT,
                 )
             )
         ).scalar_one_or_none()
@@ -282,7 +284,7 @@ async def block_user(
         raise HTTPException(status_code=500, detail="Internal server error")
 
     
-@superadmin_student_management_router.patch("/unblock-user/{user_id}")
+@superadmin_student_management_router.patch("/unblock-student/{user_id}")
 async def unblock_user(
     user_id: int,
     request: Request,
@@ -296,7 +298,7 @@ async def unblock_user(
                 select(User)
                 .where(
                     User.id == user_id,
-                    User.role.in_([UserRole.ADMIN, UserRole.STUDENT]),
+                    User.role == UserRole.STUDENT,
                 )
             )
         ).scalar_one_or_none()
@@ -307,7 +309,7 @@ async def unblock_user(
 
         if user.status != UserStatus.SUSPENDED:
             logger.warning("User is not suspended",extra={"user_id": user_id, "admin_id": user_data["user_id"]})
-            raise HTTPException(status_code=409, detail="User is not suspended")
+            raise HTTPException(status_code=409, detail="User is not Blocked")
 
         user.status = UserStatus.ACTIVE
         user.token_version = (user.token_version or 0) + 1
@@ -341,7 +343,7 @@ async def unblock_user(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@superadmin_student_management_router.patch("/logout-user/{user_id}")
+@superadmin_student_management_router.patch("/logout-student/{user_id}")
 async def logout_user(
     user_id: int,
     request: Request,
@@ -355,7 +357,7 @@ async def logout_user(
                 select(User)
                 .where(
                     User.id == user_id,
-                    User.role.in_([UserRole.ADMIN, UserRole.STUDENT]),
+                    User.role == UserRole.STUDENT,
                 )
             )
         ).scalar_one_or_none()

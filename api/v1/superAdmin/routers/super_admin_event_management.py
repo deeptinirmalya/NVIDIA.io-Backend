@@ -14,17 +14,37 @@ from security.rate_limiter import rate_limiter
 from utils import auth_util, util
 
 
-from ..schemas import EventAdminResponse, EventCreate, EventUpdate
+from ..schemas import EventAdminResponse, EventCreate, EventUpdate, EventResponse
 from core.config import settings
 from monitoring.posthog import posthog
 from engine.cache import delete_value
 from engine.bloomfilter import add_event_id_to_bloom
-
-from db.models.event import (
-    Event,
-    EventCategory,
-    EventStatus
+from db.models.auth import(
+    User,
+    UserRole,
+    UserStatus,
+    Profile,
 )
+
+from db.models.event import(
+    Event,
+    EventStatus,
+    ParticipationType,
+)
+
+from db.models.single_registration import(
+    SingleRegistration,
+    SingleRegistrationPaymentStatus,
+    SingleRegistrationStatus
+)
+
+from db.models.team_registration import(
+    TeamRegistration,
+    TeamRegistrationStatus,
+    TeamRegistrationPaymentStatus,
+    TeamStatus
+)
+from db.models.team_member import TeamMember
 
 from services.auditlog_service import create_audit_log
 from services.count_service import increase_event_count
@@ -73,6 +93,41 @@ def validate_banner(base64_image: str):
 
 
 #add token required 
+
+@superadmin_event_router.get("/view/{event_id:int}/details")
+async def get_event_details(
+    event_id: int,
+    db: AsyncSession = Depends(get_db),
+    user_id: dict = Depends(token_required(allowed_roles=["SUPERADMIN"])),
+    _= Depends(rate_limiter(max_tokens=10, refill_rate=0.5, mode="both"))
+):
+    try:
+
+        stmt = select(Event).where(Event.id == event_id)
+        event_result = (await db.execute(stmt)).scalar_one_or_none()
+
+        if not event_result or event_result is None:
+            logger.warning(f"no event found for id {event_id}")
+            raise HTTPException(status_code=404, detail="No event found")
+
+        event_details = EventResponse.model_validate(event_result).model_dump(mode="json")
+
+        return JSONResponse(
+            status_code=200,
+            content={
+                "success": True,
+                "message": "Event details",
+                "data": event_details,
+                "error": None
+            }
+        )
+    except HTTPException as httpe:
+        raise httpe
+    except Exception as e:
+        logger.exception("Errror during fatching event details", extra={"event_id": event_id, "error": str(e)})
+        raise HTTPException(status_code=500, detail="Faild to load event details")
+
+
 @superadmin_event_router.post("/add-event")
 async def create_event(
     event_data: EventCreate,
@@ -149,7 +204,7 @@ async def create_event(
         raise HTTPException(status_code=500, detail="Unable to create event")
 
 
-@superadmin_event_router.get("/{event_id}")
+@superadmin_event_router.get("/{event_id:int}")
 async def get_event_for_editing(
     event_id: int,
     db: AsyncSession = Depends(get_db),
@@ -178,7 +233,7 @@ async def get_event_for_editing(
         raise HTTPException(status_code=500, detail="Unable to retrieve event details")
 
 
-@superadmin_event_router.put("/update-event/{event_id}")
+@superadmin_event_router.put("/update-event/{event_id:int}")
 async def update_event(
     event_id: int,
     request: Request,
@@ -233,7 +288,7 @@ async def update_event(
         await create_audit_log(
             request=request,
             user_id=user_data["user_id"],
-            action="EVENY_UPDATE",
+            action="EVENT_UPDATE",
             entity_type="EVENT",
             entity_id=event_id,
             description="Event updated by superadmin",
@@ -260,7 +315,7 @@ async def update_event(
         raise HTTPException(status_code=500, detail="Unable to update event")
 
 
-@superadmin_event_router.patch("/update-event-status/{event_id}/{status}")
+@superadmin_event_router.patch("/update-event-status/{event_id:int}/{status}")
 async def update_event_status(
     event_id: int,
     status: str,
@@ -321,5 +376,239 @@ async def update_event_status(
         logger.exception(
             "exception during event status update",
             extra={"admin_id": user_id, "error": str(e)},
+        )
+        raise HTTPException(status_code=500, detail="Internal Server Error")
+
+
+@superadmin_event_router.get("/all-events")
+async def get_all_events(
+    search: str | None = Query(default=None, max_length=100, description="name of the event"),
+    page: int = Query(1, ge=1, description="Page number starting from 1"),
+    limit: int = Query(15, ge=1, le=15, description="Events per page"),
+    db: AsyncSession = Depends(get_db),
+    user_data: dict = Depends(token_required(allowed_roles=["SUPERADMIN"])),
+    _rate_limit = Depends(rate_limiter(max_tokens=10, refill_rate=0.5, mode="both")),
+):
+    user_id = user_data["user_id"]
+    # user_id = 1
+    try:
+        search_term = search.strip() if search else ""
+        offset = (page - 1) * limit
+
+        stmt = select(
+            Event.id.label("event_id"),
+            Event.name.label("event_name"),
+            Event.category.label("event_category"),
+            Event.participation_type.label("event_participation_type"),
+            Event.status.label("event_status"),
+        ).order_by(asc(Event.id))
+
+        if search_term:
+            stmt = stmt.where(Event.name.ilike(f"%{search_term}%"))
+
+        stmt = stmt.offset(offset).limit(limit)
+
+        result = await db.execute(stmt)
+        events = [dict(row) for row in result.mappings().all()]
+
+        return JSONResponse(
+            status_code=200,
+            content={
+                "success": True,
+                "message": "Events retrieved successfully",
+                "data": events,
+                "error": None,
+            },
+        )
+    except HTTPException as httpe:
+        raise httpe
+    except Exception as e:
+        logger.exception(
+            "exception during events fetch by admin",
+            extra={"admin_id": user_id, "error": str(e)},
+        )
+        raise HTTPException(status_code=500, detail="Internal Server Error")
+
+
+@superadmin_event_router.get("/all-events-id")
+async def get_all_events_id(
+    search: str | None = Query(default=None, max_length=100, description="name of the event"),
+    page: int = Query(1, ge=1, description="Page number starting from 1"),
+    limit: int = Query(20, ge=1, le=20, description="Events per page"),
+    db: AsyncSession = Depends(get_db),
+    user_data: dict = Depends(token_required(allowed_roles=["SUPERADMIN"])),
+    _rate_limit = Depends(rate_limiter(max_tokens=10, refill_rate=0.5, mode="both")),
+):
+    user_id = user_data["user_id"]
+    # user_id = 1
+    try:
+        search_term = search.strip() if search else ""
+        offset = (page - 1) * limit
+
+        stmt = select(
+            Event.id.label("event_id"),
+            Event.name.label("event_name"),
+            Event.participation_type.label("participation_type"),
+        ).where(
+            Event.status != EventStatus.DRAFT
+        ).order_by(asc(Event.id))
+        
+
+        if search_term:
+            stmt = stmt.where(Event.name.ilike(f"%{search_term}%"))
+
+        stmt = stmt.offset(offset).limit(limit)
+
+        result = await db.execute(stmt)
+        events = [dict(row) for row in result.mappings().all()]
+
+        return JSONResponse(
+            status_code=200,
+            content={
+                "success": True,
+                "message": "Events retrieved successfully",
+                "data": events,
+                "error": None,
+            },
+        )
+    except HTTPException as httpe:
+        raise httpe
+    except Exception as e:
+        logger.exception(
+            "exception during event id fetch by admin",
+            extra={"admin_id": user_id, "error": str(e)},
+        )
+        raise HTTPException(status_code=500, detail="Internal Server Error")
+
+
+
+@superadmin_event_router.get("/event-registrations/{event_id}")
+async def get_event_registrations(
+    event_id: int,
+    page: int = Query(1, ge=1, description="Page number starting from 1"),
+    limit: int = Query(15, ge=1, le=15, description="Registrations per page"),
+    db: AsyncSession = Depends(get_db),
+    user_data: dict = Depends(token_required(allowed_roles=["SUPERADMIN"])),
+    _rate_limit = Depends(rate_limiter(max_tokens=10, refill_rate=0.5, mode="both")),
+):
+    user_id = user_data["user_id"]
+    # user_id = 1
+    try:
+        event_type = (
+            await db.execute(
+                select(Event.participation_type).where(Event.id == event_id)
+            )
+        ).scalar_one_or_none()
+        if event_type is None:
+            raise HTTPException(status_code=404, detail="No event found")
+
+        offset = (page - 1) * limit
+        if event_type == ParticipationType.SINGLE:
+            stmt = (
+                select(
+                    SingleRegistration.id.label("registration_id"),
+                    SingleRegistration.status.label("registration_status"),
+                    SingleRegistration.payment_status,
+                    Profile.name,
+                    Profile.roll_no,
+                )
+                .join(User, User.id == SingleRegistration.user_id)
+                .outerjoin(Profile, Profile.user_id == User.id)
+                .where(SingleRegistration.event_id == event_id)
+                .order_by(SingleRegistration.id)
+                .offset(offset)
+                .limit(limit + 1)
+            )
+            rows = (await db.execute(stmt)).mappings().all()
+            has_more = len(rows) > limit
+
+            registrations = [
+                {
+                    "registration_id": row["registration_id"],
+                    "registration_status": row["registration_status"].value,
+                    "payment_status": row["payment_status"].value,
+                    "name": row["name"],
+                    "roll_number": row["roll_no"],
+                }
+                for row in rows[:limit]
+            ]
+        else:
+            stmt = (
+                select(
+                    TeamRegistration.id.label("registration_id"),
+                    TeamRegistration.team_name,
+                    TeamRegistration.team_status,
+                    TeamRegistration.status.label("registration_status"),
+                    TeamRegistration.payment_status,
+                )
+                .where(TeamRegistration.event_id == event_id)
+                .order_by(TeamRegistration.id)
+                .offset(offset)
+                .limit(limit + 1)
+            )
+            rows = (await db.execute(stmt)).mappings().all()
+            has_more = len(rows) > limit
+            page_rows = rows[:limit]
+            team_ids = [row["registration_id"] for row in page_rows]
+            members_by_team: dict[int, list[dict]] = {team_id: [] for team_id in team_ids}
+
+            if team_ids:
+                member_stmt = (
+                    select(
+                        TeamMember.team_registration_id,
+                        TeamMember.role,
+                        Profile.name,
+                        Profile.roll_no,
+                    )
+                    .join(User, User.id == TeamMember.user_id)
+                    .outerjoin(Profile, Profile.user_id == User.id)
+                    .where(
+                        TeamMember.team_registration_id.in_(team_ids),
+                        TeamMember.is_removed.is_(False),
+                    )
+                    .order_by(TeamMember.id)
+                )
+                member_rows = (await db.execute(member_stmt)).mappings().all()
+                for member in member_rows:
+                    members_by_team[member["team_registration_id"]].append(
+                        {
+                            "name": member["name"],
+                            "roll_number": member["roll_no"],
+                            "role": member["role"].value,
+                        }
+                    )
+
+            registrations = [
+                {
+                    "registration_id": row["registration_id"],
+                    "team_name": row["team_name"],
+                    "team_status": row["team_status"].value,
+                    "registration_status": row["registration_status"].value,
+                    "team_payment_status": row["payment_status"].value,
+                    "members": members_by_team[row["registration_id"]],
+                }
+                for row in page_rows
+            ]
+
+        return JSONResponse(
+            status_code=200,
+            content={
+                "success": True,
+                "message": "Event registrations retrieved successfully",
+                "data": {
+                    "event_id": event_id,
+                    "participation_type": event_type.value,
+                    "registrations": registrations,
+                    "pagination": {"page": page, "limit": limit, "has_more": has_more},
+                },
+                "error": None,
+            },
+        )
+    except HTTPException as httpe:
+        raise httpe
+    except Exception as e:
+        logger.exception(
+            "exception during event registration fetch by admin",
+            extra={"admin_id": user_id, "event_id": event_id, "error": str(e)},
         )
         raise HTTPException(status_code=500, detail="Internal Server Error")
