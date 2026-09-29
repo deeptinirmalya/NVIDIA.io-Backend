@@ -13,6 +13,7 @@ from db.models.single_registration import(
 )
 
 from utils import util, auth_util
+from services.count_service import increase_total_registration_count
 
 
 logger = logging.getLogger("Single_registration_crud")
@@ -40,6 +41,8 @@ class SingleregistrationCrudService:
 
             logger.info(f"User participate on  {event_id} free single", extra={"event_id": event_id, "user_id": user_id})
 
+            await increase_total_registration_count(db)
+            
             return JSONResponse(
                 status_code=201,
                 content={
@@ -52,6 +55,7 @@ class SingleregistrationCrudService:
                 }
             )
         except HTTPException as httpe:
+            await db.rollback()
             raise httpe
         except Exception as e:
             await db.rollback()

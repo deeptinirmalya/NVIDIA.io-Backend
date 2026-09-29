@@ -148,3 +148,58 @@ async def increase_event_count(
 
 # ======================= EVENT SECTION ===============================================
 
+# ================================= PAYMNET SECTION ===============================
+async def increase_total_success_payment_count(db: AsyncSession, amount) -> int:
+    await _ensure_stats_row(db)
+
+    await db.execute(
+        update(AdminStats)
+        .where(AdminStats.id == 1)
+        .values(total_success_payments=AdminStats.total_success_payments + 1,
+                total_success_payment_ammount = AdminStats.total_success_payment_ammount + amount)
+    )
+
+    await db.execute(
+        update(AdminStats)
+        .where(AdminStats.id == 1)
+        .values(total_payments=AdminStats.total_payments + 1)
+    )
+    await db.commit()
+
+    return True
+
+
+async def increase_total_failed_payment_count(db: AsyncSession, amount) -> int:
+    await _ensure_stats_row(db)
+
+    await db.execute(
+        update(AdminStats)
+        .where(AdminStats.id == 1)
+        .values(total_faild_payments=AdminStats.total_faild_payments + 1,
+                total_failed_payment_ammount = AdminStats.total_failed_payment_ammount + amount)
+    )
+
+    await db.execute(
+        update(AdminStats)
+        .where(AdminStats.id == 1)
+        .values(total_payments=AdminStats.total_payments + 1)
+    )
+    await db.commit()
+
+    return True
+
+
+#================= registration section ====================================
+
+async def increase_total_registration_count(db: AsyncSession, amount) -> int:
+    await _ensure_stats_row(db)
+
+    await db.execute(
+        update(AdminStats)
+        .where(AdminStats.id == 1)
+        .values(total_registration=AdminStats.total_registration + 1)
+    )
+
+    await db.commit()
+
+    return True

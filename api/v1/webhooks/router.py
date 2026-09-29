@@ -28,6 +28,7 @@ from db.models.payment import (
 )
 
 from db.models.webhook_events import WebhookEvent
+import services.count_service as cService
 
 from db.session import get_db
 from utils import auth_util
@@ -262,6 +263,8 @@ async def razorpay_webhook(
             new_webhook_event.processed = True
             new_webhook_event.processed_at = auth_util.get_now_utc()
             await db.commit()
+            await cService.increase_total_registration_count(db)
+            await cService.increase_total_success_payment_count(db, amount)
         except HTTPException:
             raise
         except Exception:
@@ -403,6 +406,7 @@ async def razorpay_webhook(
             new_webhook_event.processed = True
             new_webhook_event.processed_at = auth_util.get_now_utc()
             await db.commit()
+            await cService.increase_total_failed_payment_count(db, amount)
 
         except HTTPException:
             raise

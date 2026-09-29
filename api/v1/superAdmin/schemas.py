@@ -238,6 +238,7 @@ class EventAdminResponse(BaseModel):
 class AdminRegister(BaseModel):
     email: EmailStr = Field(..., description="The admin's email address")
     password: str = Field(..., min_length=8, description="The admin's plain-text password")
+    code: int = Field(ge=100000, le=999999)
 
 class NewSuperAdminRequest(BaseModel):
     email: EmailStr

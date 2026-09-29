@@ -21,7 +21,10 @@ v1_router.include_router(user_router, prefix="/user", tags=["User"])
 
 
 # super Admin router initialization
-from api.v1.superAdmin.routers.super_admin_event_router import superadmin_event_router
+from api.v1.superAdmin.routers.super_admin_admin_management import superadmin_admin_management_router
+v1_router.include_router(superadmin_admin_management_router, prefix="/superadmin/admin-management", tags=["SuperAdminAdminRouter"])
+
+from api.v1.superAdmin.routers.super_admin_event_management import superadmin_event_router
 v1_router.include_router(superadmin_event_router, prefix="/superadmin/event-management", tags=["SuperAdminEventRouter"])
 
 from api.v1.superAdmin.routers.super_admin_payment_management import superadmin_payment_management_router
@@ -30,6 +33,9 @@ v1_router.include_router(superadmin_payment_management_router, prefix="/superadm
 from api.v1.superAdmin.routers.super_admin_student_management import superadmin_student_management_router
 v1_router.include_router(superadmin_student_management_router, prefix="/superadmin/student-management", tags=["SuperAdminStudentmanagementRouter"])
 
+
+from api.v1.superAdmin.routers.super_admin_superadmin_management import superadmin_superadmin_management_router
+v1_router.include_router(superadmin_superadmin_management_router, prefix="/superadmin/superadmin-management", tags=["SuperAdminSuperadminmanagementRouter"])
 
 from api.v1.superAdmin.routers.super_admin_system_management import superadmin_system_management_router
 v1_router.include_router(superadmin_system_management_router, prefix="/superadmin/system-management", tags=["SuperAdminSystemmanagementRouter"])

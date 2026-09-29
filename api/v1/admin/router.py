@@ -2,7 +2,7 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, Query, Request, HTTPException
 from beanie import PydanticObjectId
 from fastapi.responses import JSONResponse
-from sqlalchemy import select, asc, update
+from sqlalchemy import func, select, asc, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 
@@ -466,6 +466,56 @@ async def student_profile_deails(
         if profile is None:
             raise HTTPException(status_code=404, detail="Profile not found")
 
+        single_registration_count = (
+            await db.scalar(
+                select(func.count())
+                .select_from(SingleRegistration)
+                .where(
+                    SingleRegistration.user_id == user_id,
+                    SingleRegistration.status == SingleRegistrationStatus.CONFIRMED,
+                    SingleRegistration.payment_status.in_([
+                        SingleRegistrationPaymentStatus.PAID,
+                        SingleRegistrationPaymentStatus.NOT_REQUIRED,
+                    ]),
+                )
+            )
+        ) or 0
+
+        team_registration_count = (
+            await db.scalar(
+                select(func.count())
+                .select_from(TeamRegistration)
+                .join(TeamMember, TeamMember.team_registration_id == TeamRegistration.id)
+                .where(
+                    TeamMember.user_id == user_id,
+                    TeamMember.is_removed.is_(False),
+                    TeamRegistration.status == TeamRegistrationStatus.CONFIRMED,
+                    TeamRegistration.payment_status.in_([
+                        TeamRegistrationPaymentStatus.PAID,
+                        TeamRegistrationPaymentStatus.NOT_REQUIRED,
+                    ]),
+                )
+            )
+        ) or 0
+
+        eligible_team_count = (
+            await db.scalar(
+                select(func.count())
+                .select_from(TeamRegistration)
+                .join(TeamMember, TeamMember.team_registration_id == TeamRegistration.id)
+                .where(
+                    TeamMember.user_id == user_id,
+                    TeamMember.is_removed.is_(False),
+                    TeamRegistration.status == TeamRegistrationStatus.CONFIRMED,
+                    TeamRegistration.payment_status.in_([
+                        TeamRegistrationPaymentStatus.PAID,
+                        TeamRegistrationPaymentStatus.NOT_REQUIRED,
+                    ]),
+                    TeamRegistration.team_status == TeamStatus.ELIGIBLE,
+                )
+            )
+        ) or 0
+
         single_participation = (
             await db.execute(
                 select(
@@ -482,9 +532,9 @@ async def student_profile_deails(
                     SingleRegistration.status == SingleRegistrationStatus.CONFIRMED,
                     SingleRegistration.payment_status.in_([
                         SingleRegistrationPaymentStatus.PAID,
-                        SingleRegistrationPaymentStatus.NOT_REQUIRED
+                        SingleRegistrationPaymentStatus.NOT_REQUIRED,
                     ])
-                    )
+                )
                 .order_by(SingleRegistration.created_at.desc())
             )
         ).mappings().all()
@@ -511,7 +561,7 @@ async def student_profile_deails(
                     TeamRegistration.status == TeamRegistrationStatus.CONFIRMED,
                     TeamRegistration.payment_status.in_([
                         TeamRegistrationPaymentStatus.PAID,
-                        TeamRegistrationPaymentStatus.NOT_REQUIRED
+                        TeamRegistrationPaymentStatus.NOT_REQUIRED,
                     ])
                 )
                 .order_by(TeamMember.created_at.desc())
@@ -519,41 +569,45 @@ async def student_profile_deails(
         ).mappings().all()
         return JSONResponse(
             status_code=200,
-            content= {
-            "success": True,
-            "message": "Profile and participation details retrieved successfully",
-            "data": {
-                "profile_details":{
-                    "name": profile["name"],
-                    "roll_number": profile["roll_no"]
+            content={
+                "success": True,
+                "message": "Profile and participation details retrieved successfully",
+                "data": {
+                    "profile_details": {
+                        "name": profile["name"],
+                        "roll_number": profile["roll_no"],
+                    },
+                    "total_registrations": single_registration_count + team_registration_count,
+                    "single_registration_count": single_registration_count,
+                    "team_registration_count": team_registration_count,
+                    "eligible_team_count": eligible_team_count,
+                    "single_participation": [
+                        {
+                            **dict(participation),
+                            "event_start_data": (
+                                participation["event_start_data"].isoformat()
+                                if participation["event_start_data"] is not None
+                                else None
+                            ),
+                            "joined_date": participation["joined_date"].isoformat(),
+                        }
+                        for participation in single_participation
+                    ],
+                    "team_participation": [
+                        {
+                            **dict(participation),
+                            "event_start_data": (
+                                participation["event_start_data"].isoformat()
+                                if participation["event_start_data"] is not None
+                                else None
+                            ),
+                            "joined_date": participation["joined_date"].isoformat(),
+                        }
+                        for participation in team_participation
+                    ],
                 },
-                "single_participation": [
-                    {
-                        **dict(participation),
-                        "event_start_data": (
-                            participation["event_start_data"].isoformat()
-                            if participation["event_start_data"] is not None
-                            else None
-                        ),
-                        "joined_date": participation["joined_date"].isoformat(),
-                    }
-                    for participation in single_participation
-                ],
-                "team_participation": [
-                    {
-                        **dict(participation),
-                        "event_start_data": (
-                            participation["event_start_data"].isoformat()
-                            if participation["event_start_data"] is not None
-                            else None
-                        ),
-                        "joined_date": participation["joined_date"].isoformat(),
-                    }
-                    for participation in team_participation
-                ],
+                "error": None,
             },
-            "error": None,
-        }
         )
     except HTTPException as httpe:
         raise httpe

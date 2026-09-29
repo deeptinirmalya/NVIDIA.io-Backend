@@ -52,152 +52,6 @@ superadmin_student_management_router = APIRouter()
 
 
 
-@superadmin_student_management_router.post("/add-admin")
-async def register_admin(
-    data: AdminRegister,
-    request: Request,
-    db: AsyncSession = Depends(get_db),
-    user_data: dict = Depends(token_required(allowed_roles=["SUPERADMIN"])),
-    _ = Depends(rate_limiter(max_tokens=2, refill_rate=0.1, mode="both"))
-):
-    try:
-        stmt = select(User).where(User.email == data.email)
-        existing_user = (await db.execute(stmt)).scalar_one_or_none()
-        if existing_user:
-            raise HTTPException(status_code=409, detail="Email already registered")
-
-        is_valid, message = auth_util.validate_password(data.password)
-        if not is_valid:
-            raise HTTPException(status_code=422, detail=message)
-
-        admin = User(
-            email=data.email,
-            password_hash=auth_util.hash_password(data.password),
-            role=UserRole.ADMIN,
-            created_at=auth_util.get_now_utc(),
-        )
-        db.add(admin)
-        await db.commit()
-        await db.refresh(admin)
-
-        await cServices.increase_superadmin_count(db)
-
-        await create_audit_log(
-            request=request,
-            user_id=user_data["user_id"],
-            action="NEW_ADMIN",
-            entity_type="ADMIN",
-            entity_id=admin.id,
-            description="New admin added by admin",
-            metadata={
-                "new_admin_data": data.email,
-            },
-        )
-        return JSONResponse(
-            status_code=201,
-            content={
-                "success": True,
-                "message": "Register success full",
-                "data": None,
-                "error": None
-            }
-        )
-
-    except HTTPException as httpe:
-        raise httpe
-    except Exception as e:
-        logger.exception("Exception during admin register", extra={"email": data.email})
-        raise HTTPException(status_code=500, detail="Internal Serevr error")
-
-
-@superadmin_student_management_router.post("/add-super-admin")
-async def add_super_admin(
-    data: NewSuperAdminRequest,
-    request: Request,
-    db: AsyncSession = Depends(get_db),
-    user_data: dict = Depends(token_required(allowed_roles=["SUPERADMIN"])),
-    _ = Depends(rate_limiter(max_tokens=3, refill_rate=0.1, mode="both"))
-):
-    user_id = user_data["user_id"]
-    # user_id = 1
-
-    now = auth_util.get_now_utc()
-
-    try:
-        s, m = auth_util.validate_password(data.password)
-        if not s:
-            raise HTTPException(status_code=422, detail=m)
-
-        existing_email = (await db.execute(select(User.id).where(User.email == data.email.lower()))).scalar_one_or_none()
-        if existing_email is not None:
-            raise HTTPException(status_code=422, detail="Email already exist")
-
-        re = await verify_superadmin_code("NEW_SUPER_ADMIN_ADD", user_id, db, data.code)
-        if not re["success"]:
-            raise HTTPException(status_code=409, detail=re["message"])
-
-        _, enc_secret, qr_base64 = await auth_util.generate_totp_qr(str(data.email))
-
-        new_superadmin = User(
-            email = data.email,
-            password_hash = auth_util.hash_password(data.password),
-            role = UserRole.SUPERADMIN,
-            is_verified = True,
-            status = UserStatus.ACTIVE,
-            created_at = now
-        )
-        db.add(new_superadmin)
-        await db.flush()
-        await db.refresh(new_superadmin)
-
-        new_totp = SuperAdminTotp(
-            user_id = new_superadmin.id,
-            secret_key = enc_secret,
-            created_at = now
-        )
-        db.add(new_totp)
-
-        await db.commit()
-
-        #call the count service
-        await cServices.increase_superadmin_count(db)
-
-        await create_audit_log(
-            request=request,
-            user_id=user_data["user_id"],
-            action="NEW_SUPERADMIN",
-            entity_type="SUPERADMIN",
-            entity_id=new_superadmin.id,
-            description="New superadmin added by admin",
-            metadata={
-                "new_superadmin_data": data,
-            },
-        )
-
-        return JSONResponse(
-            status_code=200,
-            content={
-                "success": True,
-                "message": "New super admin added scan the Qr code with google authontication app",
-                "data": {
-                    "base64": qr_base64
-                },
-                "error": None
-            }
-        )
-    except HTTPException as httpe:
-        raise httpe
-    except Exception as e:
-        logger.exception("Exception during new super admin add", extra={
-            "user_id": user_id,
-            "email": str(data.email)
-        })
-        raise HTTPException(status_code=500, detail="Internal server error")
-
-
-
-
-
 
 @superadmin_student_management_router.get("/student-details")
 async def get_student_participations_by_roll_number(
@@ -318,15 +172,15 @@ async def get_student_participations_by_roll_number(
             for row in team_rows
         ]
 
-        await create_audit_log(
-            request=request,
-            user_id=user_data["user_id"],
-            action="VIEW_STUDENT_PARTICIPATIONS",
-            entity_type="USER",
-            entity_id=student_user_id,
-            description="Student participation report fetched by roll number or user id",
-            metadata={"roll_number": student_roll, "user_id": student_user_id},
-        )
+        # await create_audit_log(
+        #     request=request,
+        #     user_id=user_data["user_id"],
+        #     action="VIEW_STUDENT_PARTICIPATIONS",
+        #     entity_type="USER",
+        #     entity_id=student_user_id,
+        #     description="Student participation report fetched by roll number or user id",
+        #     metadata={"roll_number": student_roll, "user_id": student_user_id},
+        # )
 
         return JSONResponse(
             status_code=200,
@@ -368,7 +222,7 @@ async def get_student_participations_by_roll_number(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@superadmin_student_management_router.put("/block-user/{user_id}")
+@superadmin_student_management_router.patch("/block-user/{user_id}")
 async def block_user(
     user_id: int,
     request: Request,
@@ -428,7 +282,7 @@ async def block_user(
         raise HTTPException(status_code=500, detail="Internal server error")
 
     
-@superadmin_student_management_router.put("/unblock-user/{user_id}")
+@superadmin_student_management_router.patch("/unblock-user/{user_id}")
 async def unblock_user(
     user_id: int,
     request: Request,
@@ -487,7 +341,7 @@ async def unblock_user(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@superadmin_student_management_router.put("/logout-user/{user_id}")
+@superadmin_student_management_router.patch("/logout-user/{user_id}")
 async def logout_user(
     user_id: int,
     request: Request,

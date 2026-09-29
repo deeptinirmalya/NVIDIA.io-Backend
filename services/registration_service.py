@@ -137,7 +137,24 @@ class RegistrationService:
         user_id: int
     ):
         try:
-            stmt = select(SingleRegistration.id).where(SingleRegistration.user_id == user_id, SingleRegistration.event_id == event_id)
+            stmt = (select(SingleRegistration.id)
+                    .where(
+                        SingleRegistration.user_id == user_id,
+                        SingleRegistration.event_id == event_id,
+                        (
+                            SingleRegistration.status.in_([
+                                SingleRegistrationStatus.CONFIRMED,
+                                SingleRegistrationStatus.PENDING,
+                            ])
+                            |
+                            (
+                                SingleRegistration.status == SingleRegistrationStatus.CANCELLED
+                                & SingleRegistration.payment_status.in_([
+                                    SingleRegistrationPaymentStatus.NOT_REQUIRED,
+                                ])
+                            )
+                        )
+                    ))
             existing_result = (await db.execute(stmt)).scalar_one_or_none()
             if existing_result is not None:
                 logger.warning(f"User already participate on  {event_id}", extra={"event_id": event_id, "user_id": user_id})
@@ -170,16 +187,26 @@ class RegistrationService:
             if idempotency_response is not None:
                 return idempotency_response
 
-            # Reject a new payment attempt when the user already has a registration.
+            # Reject a new payment attempt when the user already has an active or cancelled paid/refunded/not-required registration.
             stmt = (select(SingleRegistration.id)
                     .where(
                         SingleRegistration.user_id == user_id,
                         SingleRegistration.event_id == event_id,
-                        SingleRegistration.status.in_([
-                            SingleRegistrationStatus.CONFIRMED,
-                            SingleRegistrationStatus.PENDING
-                        ])
-                        ))
+                        (
+                            SingleRegistration.status.in_([
+                                SingleRegistrationStatus.CONFIRMED,
+                                SingleRegistrationStatus.PENDING,
+                            ])
+                            |
+                            (
+                                SingleRegistration.status == SingleRegistrationStatus.CANCELLED
+                                & SingleRegistration.payment_status.in_([
+                                    SingleRegistrationPaymentStatus.PAID,
+                                    SingleRegistrationPaymentStatus.REFUNDED
+                                ])
+                            )
+                        )
+                    ))
             existing_result = (await db.execute(stmt)).scalar_one_or_none()
             if existing_result is not None:
                 logger.warning(f"User already participate on  {event_id}", extra={"event_id": event_id, "user_id": user_id})
@@ -210,7 +237,24 @@ class RegistrationService:
         team_name: str
     ):
         try:
-            stmt = select(TeamRegistration.id).where(TeamRegistration.captain_id == user_id, TeamRegistration.event_id == event_id)
+            stmt = (select(TeamRegistration.id)
+                    .where(
+                        TeamRegistration.captain_id == user_id,
+                        TeamRegistration.event_id == event_id,
+                        (
+                            TeamRegistration.status.in_([
+                                TeamRegistrationStatus.CONFIRMED,
+                                TeamRegistrationStatus.PENDING,
+                            ])
+                            |
+                            (
+                                TeamRegistration.status == TeamRegistrationStatus.CANCELLED
+                                & TeamRegistration.payment_status.in_([
+                                    TeamRegistrationPaymentStatus.NOT_REQUIRED,
+                                ])
+                            )
+                        )
+                    ))
             existing_result = (await db.execute(stmt)).scalar_one_or_none()
             if existing_result is not None:
                 logger.warning(f"User already participate on  {event_id}", extra={"event_id": event_id, "user_id": user_id})
@@ -242,16 +286,27 @@ class RegistrationService:
             if idempotency_response is not None:
                 return idempotency_response
 
-            # Reject a new payment attempt when the user already has a registration.
+            # Reject a new payment attempt when the user already has an active or cancelled paid/refunded/not-required registration.
             stmt = (select(TeamRegistration.id)
                     .where(
                         TeamRegistration.captain_id == user_id,
                         TeamRegistration.event_id == event_id,
-                        TeamRegistration.status.in_([
-                            TeamRegistrationStatus.CONFIRMED,
-                            TeamRegistrationStatus.PENDING
-                        ])
-                        ))
+                        (
+                            TeamRegistration.status.in_([
+                                TeamRegistrationStatus.CONFIRMED,
+                                TeamRegistrationStatus.PENDING,
+                            ])
+                            |
+                            (
+                                TeamRegistration.status == TeamRegistrationStatus.CANCELLED
+                                & TeamRegistration.payment_status.in_([
+                                    TeamRegistrationPaymentStatus.PAID,
+                                    TeamRegistrationPaymentStatus.REFUNDED,
+                                    TeamRegistrationPaymentStatus.NOT_REQUIRED,
+                                ])
+                            )
+                        )
+                    ))
             existing_result = (await db.execute(stmt)).scalar_one_or_none()
             if existing_result is not None:
                 logger.warning(f"User already participate on  {event_id}", extra={"event_id": event_id, "user_id": user_id})
