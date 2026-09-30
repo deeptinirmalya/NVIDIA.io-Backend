@@ -101,6 +101,8 @@ class Settings(BaseSettings):
 
     FRONTEND_URL: str = os.getenv("FRONTEND_URL", "http://localhost:5173")
 
+    MAIL_SERVICE_API_KEY: str = os.getenv("MAIL_SERVICE_API_KEY", "")
+
     BACKEND_URL: str = os.getenv("BACKEND_URL", "http://localhost:8000")
     
     @property

@@ -284,7 +284,7 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
             "success": False,
             "message": error_msg,
             "data": None,
-            "error": "Validation Error"
+            "error": "Validation Errorr"
         }
     )
 

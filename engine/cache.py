@@ -21,7 +21,7 @@ redis_client = Redis(
 )
 
 
-async def set_value(key: str, value, expire: int = 3600):
+async def set_value(key: str, value, expire: int | None = 3600):
     await redis_client.set(
         key,
         json.dumps(value),

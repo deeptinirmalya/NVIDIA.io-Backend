@@ -151,6 +151,9 @@ class RegistrationService:
                                 SingleRegistration.status == SingleRegistrationStatus.CANCELLED
                                 & SingleRegistration.payment_status.in_([
                                     SingleRegistrationPaymentStatus.NOT_REQUIRED,
+                                    SingleRegistrationPaymentStatus.PENDING,
+                                    SingleRegistrationPaymentStatus.PAID,
+                                    SingleRegistrationPaymentStatus.REFUNDED
                                 ])
                             )
                         )
@@ -201,6 +204,8 @@ class RegistrationService:
                             (
                                 SingleRegistration.status == SingleRegistrationStatus.CANCELLED
                                 & SingleRegistration.payment_status.in_([
+                                    SingleRegistrationPaymentStatus.NOT_REQUIRED,
+                                    SingleRegistrationPaymentStatus.PENDING,
                                     SingleRegistrationPaymentStatus.PAID,
                                     SingleRegistrationPaymentStatus.REFUNDED
                                 ])
@@ -250,7 +255,10 @@ class RegistrationService:
                             (
                                 TeamRegistration.status == TeamRegistrationStatus.CANCELLED
                                 & TeamRegistration.payment_status.in_([
-                                    TeamRegistrationPaymentStatus.NOT_REQUIRED,
+                                    SingleRegistrationPaymentStatus.NOT_REQUIRED,
+                                    SingleRegistrationPaymentStatus.PENDING,
+                                    SingleRegistrationPaymentStatus.PAID,
+                                    SingleRegistrationPaymentStatus.REFUNDED
                                 ])
                             )
                         )
@@ -300,9 +308,10 @@ class RegistrationService:
                             (
                                 TeamRegistration.status == TeamRegistrationStatus.CANCELLED
                                 & TeamRegistration.payment_status.in_([
-                                    TeamRegistrationPaymentStatus.PAID,
-                                    TeamRegistrationPaymentStatus.REFUNDED,
-                                    TeamRegistrationPaymentStatus.NOT_REQUIRED,
+                                    SingleRegistrationPaymentStatus.NOT_REQUIRED,
+                                    SingleRegistrationPaymentStatus.PENDING,
+                                    SingleRegistrationPaymentStatus.PAID,
+                                    SingleRegistrationPaymentStatus.REFUNDED
                                 ])
                             )
                         )

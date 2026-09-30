@@ -73,6 +73,9 @@ class TeamregistrationCrudService:
             )
             db.add(new_tem_member_entry)
 
+            from services.count_service import increase_total_registration_count
+            await increase_total_registration_count(db)
+
             await db.commit()
 
             logger.info(f"User create team  on {event_id} single", extra={"event_id": event_id, "user_id": user_id})

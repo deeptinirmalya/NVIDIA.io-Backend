@@ -43,7 +43,7 @@ async def register_admin(
     _ = Depends(rate_limiter(max_tokens=2, refill_rate=0.1, mode="both"))
 ):
     try:
-        user_id = user_data["user_id"]
+        # user_id = user_data["user_id"]
 
         stmt = select(User).where(User.email == data.email)
         existing_user = (await db.execute(stmt)).scalar_one_or_none()
@@ -96,7 +96,7 @@ async def register_admin(
     except HTTPException as httpe:
         raise httpe
     except Exception as e:
-        logger.exception("Exception during admin register", extra={"email": data.email})
+        logger.exception("Exception during admin register", extra={"email": data.email, "error": str(e)})
         raise HTTPException(status_code=500, detail="Internal Serevr error")
 
 @superadmin_admin_management_router.get("/all-admins")

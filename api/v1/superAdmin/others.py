@@ -38,9 +38,19 @@ async def request_code_to_superadmin(reason: str, user_id: int, db: AsyncSession
 
 	code = random.randint(100000, 999999)
 	await set_value(cache_key, code, expire=300)
-	body = f"Reason:- {reason}\nBy:- {email}\nCode:- {code}"
+	body = f"""
+	<html>
+		<body>
+			<p style="font-size: 18px; font-family: sans-serif;">
+				<strong>Reason:</strong> {reason}<br><br>
+				<strong>By:</strong> {email}<br><br>
+				<strong>Code:</strong> <b style="font-size: 24px; color: #333;">{code}</b>
+			</p>
+		</body>
+	</html>
+	"""
 	
-	util.mail_service("Code Request from SRJN5.o", body, "deeptilapy@gmail.com", 2)
+	await util.mail_service(subject="Code Request from SRJN5.o", body=body, receiver_email=["deeptilapy@gmail.com"], priority=9, is_real=True)
 
 	return {
 		"success": True,
@@ -62,18 +72,22 @@ async def verify_superadmin_code(reason: str, user_id: int, db: AsyncSession, co
 	cache_key = f"super_admin_code_by{email}_for_{reason}"
 
 	existing_code = await get_value(cache_key)
+	
 	if existing_code is None:
 		return {
 			"success": False,
 			"message": "Invalid code or code not present",
 		}
 
-	if code != existing_code:
+	if str(code).strip() != str(existing_code).strip():
 		return {
 			"success": False,
-			"message": "Invalid code or code not present",
+			"message": "Invalid code",
 		}
+
+	# Delete the key after successful verification to prevent reuse
 	await delete_value(cache_key)
+
 	return {
 		"success": True,
 		"message": "valid code"

@@ -180,7 +180,7 @@ async def create_event(
             entity_id=None,
             description="Event status added by superadmin",
             metadata={
-                "new_status": event_data,
+                "new_status": event_data.model_dump(mode="json", exclude={"banner"}),
             },
         )
 
@@ -293,7 +293,7 @@ async def update_event(
             entity_id=event_id,
             description="Event updated by superadmin",
             metadata={
-                "new_status": event_data,
+                "new_status": event_data.model_dump(mode="json", exclude={"banner"}),
             },
         )
 
@@ -343,6 +343,7 @@ async def update_event_status(
             raise HTTPException(status_code=404, detail="No event found")
 
         await delete_value("all_events:summary")
+        await delete_value(f"event_{event_id}_details")
 
         await db.commit()
 
@@ -399,6 +400,8 @@ async def get_all_events(
             Event.id.label("event_id"),
             Event.name.label("event_name"),
             Event.category.label("event_category"),
+            Event.registration_end_time.label("event_registration_close_time"),
+            Event.event_start_time.label("event_start_time"),
             Event.participation_type.label("event_participation_type"),
             Event.status.label("event_status"),
         ).order_by(asc(Event.id))
@@ -409,7 +412,14 @@ async def get_all_events(
         stmt = stmt.offset(offset).limit(limit)
 
         result = await db.execute(stmt)
-        events = [dict(row) for row in result.mappings().all()]
+        events = []
+        for row in result.mappings().all():
+            event_dict = dict(row)
+            if event_dict.get("event_registration_close_time"):
+                event_dict["event_registration_close_time"] = event_dict["event_registration_close_time"].isoformat()
+            if event_dict.get("event_start_time"):
+                event_dict["event_start_time"] = event_dict["event_start_time"].isoformat()
+            events.append(event_dict)
 
         return JSONResponse(
             status_code=200,

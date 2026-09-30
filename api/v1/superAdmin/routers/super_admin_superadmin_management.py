@@ -93,7 +93,7 @@ async def add_super_admin(
             entity_id=new_superadmin.id,
             description="New superadmin added by super adminadmin",
             metadata={
-                "new_superadmin_data": data,
+                "new_superadmin_email": data.email,
             },
         )
 
@@ -119,3 +119,47 @@ async def add_super_admin(
             "error": str(e)
         })
         raise HTTPException(status_code=500, detail="Internal server error")
+
+
+
+
+@superadmin_superadmin_management_router.get("/all-superadmins")
+async def all_admins(
+    db: AsyncSession = Depends(get_db),
+    user_data: dict = Depends(token_required(allowed_roles=["SUPERADMIN"])),
+    _ = Depends(rate_limiter(max_tokens=5, refill_rate=0.1, mode="both"))
+):
+    try:
+        superadmins = (await db.execute(
+            select(User.id, User.email, User.created_at, User.status, User.last_login)
+            .where(User.role == UserRole.SUPERADMIN)
+        )).mappings().all()
+
+        superadmin_data = [
+            {
+                "id": superadmins["id"],
+                "email": superadmins["email"],
+                "created_at": superadmins["created_at"].isoformat() if superadmins["created_at"] else None,
+                "status": superadmins["status"].value if superadmins["status"] else None,
+                "last_login": superadmins["last_login"].isoformat() if superadmins["last_login"] else None,
+            }
+            for superadmins in superadmins
+        ]
+
+        return JSONResponse(
+            status_code=200,
+            content={
+                "success": True,
+                "message": "Admins retrieved successfully",
+                "data": superadmin_data,
+                "error": None,
+            },
+        )
+    except HTTPException as httpe:
+        raise httpe
+    except Exception as e:
+        logger.exception("exception during fetching all superadmins", extra={
+            "superadmin_id": user_data["user_id"],
+            "error": str(e)
+        })
+        raise HTTPException(status_code=500, detail="Internal Server error")

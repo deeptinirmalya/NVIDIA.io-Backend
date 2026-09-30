@@ -191,13 +191,27 @@ async def increase_total_failed_payment_count(db: AsyncSession, amount) -> int:
 
 #================= registration section ====================================
 
-async def increase_total_registration_count(db: AsyncSession, amount) -> int:
+async def increase_total_registration_count(db: AsyncSession, amount: int = 1) -> int:
     await _ensure_stats_row(db)
 
     await db.execute(
         update(AdminStats)
         .where(AdminStats.id == 1)
-        .values(total_registration=AdminStats.total_registration + 1)
+        .values(total_registration=AdminStats.total_registration + amount)
+    )
+
+    await db.commit()
+
+    return True
+
+
+async def decrease_total_registration_count(db: AsyncSession, amount: int = 1) -> int:
+    await _ensure_stats_row(db)
+
+    await db.execute(
+        update(AdminStats)
+        .where(AdminStats.id == 1)
+        .values(total_registration=AdminStats.total_registration - amount)
     )
 
     await db.commit()

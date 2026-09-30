@@ -1,8 +1,7 @@
-import requests
+import httpx
 from mailtrap import Mail, Address, MailtrapClient
 from datetime import timezone
 from zoneinfo import ZoneInfo
-from worker.tasks import send_wl_mail
 import secrets
 import string
 import io
@@ -118,11 +117,31 @@ def decode_dict(secret_code: str, secret_key: bytes | str) -> dict:
     return data
 # ======================================================================
 
-def mail_service(subject, body, receiver_email, priority, is_real = True):
+async def mail_service(subject, body, receiver_email, priority, is_real = True):
     if not is_real:
         mailtrap_service(subject, body, receiver_email)
     else:
-        send_wl_mail(subject, body, receiver_email, priority)
+        async with httpx.AsyncClient(timeout=30) as client:
+            response = await client.post(
+                "https://masterapi.deepti.qd.je/api/send-email",
+                headers={
+                    "X-API-KEY": settings.MAIL_SERVICE_API_KEY,
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "authority_name": "Srjn 5.o",
+                    "subject": subject,
+                    "body": body,
+                    "receiver_emails": receiver_email,
+                    "cc_emails": [],
+                    "bcc_emails": [],
+                    "body_type": "html",
+                    "priority_level": priority,
+                },
+            )
+            response.raise_for_status()
+
+    print("✅ MAil  sent to Broker ✅")
 
 
 

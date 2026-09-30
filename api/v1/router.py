@@ -30,6 +30,9 @@ v1_router.include_router(superadmin_event_router, prefix="/superadmin/event-mana
 from api.v1.superAdmin.routers.super_admin_singleRegistration_management import superadmin_singleRegistration_management_router
 v1_router.include_router(superadmin_singleRegistration_management_router, prefix="/superadmin/singleregistration-management", tags=["SuperAdminSingleregistrationmanagementRouter"])
 
+from api.v1.superAdmin.routers.super_admin_teamRegistration_management import superadmin_teamRegistration_management_router
+v1_router.include_router(superadmin_teamRegistration_management_router, prefix="/superadmin/teamregistration-management", tags=["SuperAdminTeamregistrationmanagementRouter"])
+
 from api.v1.superAdmin.routers.super_admin_payment_management import superadmin_payment_management_router
 v1_router.include_router(superadmin_payment_management_router, prefix="/superadmin/payment-management", tags=["SuperAdminPaymentmanagementRouter"])
 
