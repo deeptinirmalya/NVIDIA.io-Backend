@@ -1,5 +1,6 @@
 from datetime import datetime
 from enum import Enum
+from typing import List
 
 from pydantic import BaseModel, EmailStr, Field
 from pydantic import BaseModel, Field, model_validator, ConfigDict
@@ -269,3 +270,10 @@ class NewSuperAdminRequest(BaseModel):
     email: EmailStr
     password: str = Field(min_length=8, max_length=8)
     code: int = Field(ge=100000, le=999999)
+
+
+
+class EmailSentRequest(BaseModel):
+    reciver_emails: List[EmailStr]
+    cc_emails: List[EmailStr] | None = None
+    bcc_emails: List[EmailStr] | None = None

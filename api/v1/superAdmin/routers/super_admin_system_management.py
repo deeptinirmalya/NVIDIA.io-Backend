@@ -4,7 +4,7 @@ from fastapi.responses import JSONResponse
 
 
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, update, desc, asc
+from sqlalchemy import select, update, desc, asc, func
 
 from db.session import get_db
 from security.auth import token_required
@@ -12,6 +12,8 @@ from security.rate_limiter import rate_limiter
 from utils import auth_util, util
 
 from db.models.admin_states import AdminStats
+from db.models.audit_log import AuditLog
+from db.models.auth import User
 
 
 
@@ -128,3 +130,76 @@ async def dashboard_data(
             "error": str(e)
         })
         raise HTTPException(status_code=500, detail="Interal Server Error")
+
+
+
+
+@superadmin_system_management_router.get("/audit-logs")
+async def view_audit_logs(
+    user_id: int | None = Query(default=None, ge=1),
+    entity_type: str | None = Query(default=None, min_length=1, max_length=50),
+    page: int = Query(1, ge=1, description="Page number starting from 1"),
+    limit: int = Query(15, ge=1, le=100, description="Audit logs per page"),
+    db: AsyncSession = Depends(get_db),
+    requesting_user: dict = Depends(token_required(allowed_roles=["SUPERADMIN"])),
+    _ = Depends(rate_limiter(max_tokens=10, refill_rate=0.5, mode="both")),
+):
+    requesting_user_id = requesting_user["user_id"]
+    try:
+        filters = []
+        if user_id is not None:
+            filters.append(AuditLog.user_id == user_id)
+        if entity_type is not None:
+            filters.append(AuditLog.entity_type == entity_type.strip())
+
+        total = await db.scalar(
+            select(func.count(AuditLog.id)).where(*filters)
+        )
+        offset = (page - 1) * limit
+        result = await db.execute(
+            select(
+                AuditLog.id,
+                AuditLog.user_id,
+                User.email.label("user_email"),
+                AuditLog.action,
+                AuditLog.entity_type,
+                AuditLog.created_at,
+            )
+            .outerjoin(User, User.id == AuditLog.user_id)
+            .where(*filters)
+            .order_by(desc(AuditLog.created_at), desc(AuditLog.id))
+            .offset(offset)
+            .limit(limit)
+        )
+
+        logs = []
+        for row in result.mappings().all():
+            log = dict(row)
+            log["created_at"] = log["created_at"].isoformat()
+            logs.append(log)
+
+        return JSONResponse(
+            status_code=200,
+            content={
+                "success": True,
+                "message": "Audit logs retrieved successfully",
+                "data": {
+                    "items": logs,
+                    "pagination": {
+                        "page": page,
+                        "limit": limit,
+                        "total": total or 0,
+                        "total_pages": ((total or 0) + limit - 1) // limit,
+                    },
+                },
+                "error": None,
+            },
+        )
+    except HTTPException as httpe:
+        raise httpe
+    except Exception as e:
+        logger.exception(
+            "exception during audit log retrieval",
+            extra={"user_id": requesting_user_id, "error": str(e)},
+        )
+        raise HTTPException(status_code=500, detail="Internal Server Error")

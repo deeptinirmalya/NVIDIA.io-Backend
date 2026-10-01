@@ -22,28 +22,32 @@ v1_router.include_router(user_router, prefix="/user", tags=["User"])
 
 # super Admin router initialization
 from api.v1.superAdmin.routers.super_admin_admin_management import superadmin_admin_management_router
-v1_router.include_router(superadmin_admin_management_router, prefix="/superadmin/admin-management", tags=["SuperAdminAdminRouter"])
+v1_router.include_router(superadmin_admin_management_router, prefix="/superadmin/admin-management", tags=["SuperAdmin Admin Router"])
 
 from api.v1.superAdmin.routers.super_admin_event_management import superadmin_event_router
-v1_router.include_router(superadmin_event_router, prefix="/superadmin/event-management", tags=["SuperAdminEventRouter"])
+v1_router.include_router(superadmin_event_router, prefix="/superadmin/event-management", tags=["SuperAdmin Event Router"])
 
 from api.v1.superAdmin.routers.super_admin_singleRegistration_management import superadmin_singleRegistration_management_router
-v1_router.include_router(superadmin_singleRegistration_management_router, prefix="/superadmin/singleregistration-management", tags=["SuperAdminSingleregistrationmanagementRouter"])
+v1_router.include_router(superadmin_singleRegistration_management_router, prefix="/superadmin/singleregistration-management", tags=["SuperAdmin Singleregistration management Router"])
 
 from api.v1.superAdmin.routers.super_admin_teamRegistration_management import superadmin_teamRegistration_management_router
-v1_router.include_router(superadmin_teamRegistration_management_router, prefix="/superadmin/teamregistration-management", tags=["SuperAdminTeamregistrationmanagementRouter"])
+v1_router.include_router(superadmin_teamRegistration_management_router, prefix="/superadmin/teamregistration-management", tags=["SuperAdmin Teamregistration management Router"])
 
 from api.v1.superAdmin.routers.super_admin_payment_management import superadmin_payment_management_router
-v1_router.include_router(superadmin_payment_management_router, prefix="/superadmin/payment-management", tags=["SuperAdminPaymentmanagementRouter"])
+v1_router.include_router(superadmin_payment_management_router, prefix="/superadmin/payment-management", tags=["SuperAdmin Payment management Router"])
 
 from api.v1.superAdmin.routers.super_admin_student_management import superadmin_student_management_router
-v1_router.include_router(superadmin_student_management_router, prefix="/superadmin/student-management", tags=["SuperAdminStudentmanagementRouter"])
+v1_router.include_router(superadmin_student_management_router, prefix="/superadmin/student-management", tags=["SuperAdmin Student management Router"])
 
 
 from api.v1.superAdmin.routers.super_admin_superadmin_management import superadmin_superadmin_management_router
-v1_router.include_router(superadmin_superadmin_management_router, prefix="/superadmin/superadmin-management", tags=["SuperAdminSuperadminmanagementRouter"])
+v1_router.include_router(superadmin_superadmin_management_router, prefix="/superadmin/superadmin-management", tags=["SuperAdmin Superadmin management Router"])
 
 from api.v1.superAdmin.routers.super_admin_system_management import superadmin_system_management_router
-v1_router.include_router(superadmin_system_management_router, prefix="/superadmin/system-management", tags=["SuperAdminSystemmanagementRouter"])
+v1_router.include_router(superadmin_system_management_router, prefix="/superadmin/system-management", tags=["SuperAdmin System management Router"])
+
+
+from api.v1.superAdmin.routers.super_admin_notification_management import superadmin_notification_management_router
+v1_router.include_router(superadmin_notification_management_router, prefix="/superadmin/notification-management", tags=["SuperAdmin Notification management Router"])
 
 
