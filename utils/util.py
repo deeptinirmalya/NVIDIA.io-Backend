@@ -117,7 +117,7 @@ def decode_dict(secret_code: str, secret_key: bytes | str) -> dict:
     return data
 # ======================================================================
 
-async def mail_service(subject, body, receiver_email, priority, is_real = True):
+async def mail_service(subject, body, receiver_email, cc_emails=None,  bcc_emails=None, priority=5, is_real = True):
     if not is_real:
         mailtrap_service(subject, body, receiver_email)
     else:
@@ -133,8 +133,8 @@ async def mail_service(subject, body, receiver_email, priority, is_real = True):
                     "subject": subject,
                     "body": body,
                     "receiver_emails": receiver_email,
-                    "cc_emails": [],
-                    "bcc_emails": [],
+                    "cc_emails": cc_emails,
+                    "bcc_emails": bcc_emails,
                     "body_type": "html",
                     "priority_level": priority,
                 },

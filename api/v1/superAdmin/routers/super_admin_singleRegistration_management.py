@@ -43,6 +43,7 @@ async def cancle_registartion(
     user_data: dict = Depends(token_required(allowed_roles=["SUPERADMIN"])),
     _ = Depends(rate_limiter(max_tokens=5, refill_rate=0.2, mode="both"))
 ):
+    print(f"\n particiation= id{participation_id}\n")
     try:
         verify_single_registration = (await db.execute(
             select(Event.id)

@@ -23,6 +23,7 @@ from utils import auth_util, util
 from templates import email_templates 
 
 import services.count_service as cServices
+from services.system_services import get_setting_toggle
 
 
 from .schemas import AdminLogin, SuperAdminLogin
@@ -162,6 +163,8 @@ async def google(
         user = (await db.execute(stmt)).scalar_one_or_none()
 
         if user:
+            if not await get_setting_toggle("ALLOW_STUDENT_LOGIN"):
+                raise HTTPException(status_code=503, detail="Login is partialy in Stoped")
 
             if not user.is_verified:
                 return JSONResponse(
@@ -257,8 +260,9 @@ async def google(
             
             return response
 
-#===========================================================
-        #else:
+#========= else ==================================================
+        if not await get_setting_toggle("ALLOW_STUDENT_SIGNUP"):
+            raise HTTPException(status_code=503, detail="Sign-Up is partialy in Stoped")
 
         new_user = User(
             email=email,
@@ -367,6 +371,9 @@ async def admin_login(
     client=Depends(security.get_client_info),
     session: AsyncSession = Depends(get_db)
 ):
+    if not await get_setting_toggle("ALLOW_ADMIN_LOGIN"):
+        raise HTTPException(status_code=503, detail="Login is partialy in Stoped")
+    
     verify_user = await verify_turnstile(request, data.cf_turnstile_response)
     if not verify_user:
         raise HTTPException(status_code=403, detail="Bot Detected")

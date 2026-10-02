@@ -148,13 +148,13 @@ class RegistrationService:
                             ])
                             |
                             (
-                                SingleRegistration.status == SingleRegistrationStatus.CANCELLED
-                                & SingleRegistration.payment_status.in_([
+                                (SingleRegistration.status == SingleRegistrationStatus.CANCELLED)
+                                & (SingleRegistration.payment_status.in_([
                                     SingleRegistrationPaymentStatus.NOT_REQUIRED,
                                     SingleRegistrationPaymentStatus.PENDING,
                                     SingleRegistrationPaymentStatus.PAID,
                                     SingleRegistrationPaymentStatus.REFUNDED
-                                ])
+                                ]))
                             )
                         )
                     ))
@@ -202,13 +202,13 @@ class RegistrationService:
                             ])
                             |
                             (
-                                SingleRegistration.status == SingleRegistrationStatus.CANCELLED
-                                & SingleRegistration.payment_status.in_([
+                                (SingleRegistration.status == SingleRegistrationStatus.CANCELLED)
+                                & (SingleRegistration.payment_status.in_([
                                     SingleRegistrationPaymentStatus.NOT_REQUIRED,
                                     SingleRegistrationPaymentStatus.PENDING,
                                     SingleRegistrationPaymentStatus.PAID,
                                     SingleRegistrationPaymentStatus.REFUNDED
-                                ])
+                                ]))
                             )
                         )
                     ))
@@ -253,13 +253,13 @@ class RegistrationService:
                             ])
                             |
                             (
-                                TeamRegistration.status == TeamRegistrationStatus.CANCELLED
-                                & TeamRegistration.payment_status.in_([
+                                (TeamRegistration.status == TeamRegistrationStatus.CANCELLED)
+                                & (TeamRegistration.payment_status.in_([
                                     SingleRegistrationPaymentStatus.NOT_REQUIRED,
                                     SingleRegistrationPaymentStatus.PENDING,
                                     SingleRegistrationPaymentStatus.PAID,
                                     SingleRegistrationPaymentStatus.REFUNDED
-                                ])
+                                ]))
                             )
                         )
                     ))
@@ -306,13 +306,13 @@ class RegistrationService:
                             ])
                             |
                             (
-                                TeamRegistration.status == TeamRegistrationStatus.CANCELLED
-                                & TeamRegistration.payment_status.in_([
+                                (TeamRegistration.status == TeamRegistrationStatus.CANCELLED)
+                                & (TeamRegistration.payment_status.in_([
                                     SingleRegistrationPaymentStatus.NOT_REQUIRED,
                                     SingleRegistrationPaymentStatus.PENDING,
                                     SingleRegistrationPaymentStatus.PAID,
                                     SingleRegistrationPaymentStatus.REFUNDED
-                                ])
+                                ]))
                             )
                         )
                     ))

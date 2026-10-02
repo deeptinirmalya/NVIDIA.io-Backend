@@ -16,6 +16,7 @@ from db.session import close_database, test_database_connection
 from monitoring.logger import setup_logging
 from monitoring.middleware import RequestLoggingMiddleware
 from monitoring.sentry import init_sentry
+from services.system_services import ensure_maintenance_setting, get_setting_toggle
 
 init_sentry()
 setup_logging()
@@ -25,9 +26,11 @@ DEPLOYMENT_PLATFORM = settings.DEPLOYE_PLATFORM
 CORS_ORIGINS = settings.BACKEND_CORS_ORIGINS
 
 currentmode = "normal"
+
 MAINTENANCE_ALLOWED_PATHS = [
     "/api/v1/superadmin",
-    "/api/v1/superadmin",
+    "/api/v1/auth/superadmin-login",
+    "/api/v1/event/catalogs",
     "/docs",
     "/docs/oauth2-redirect",
     "/openapi.json",
@@ -40,6 +43,10 @@ async def lifespan(app: FastAPI):
     connected = await test_database_connection()
     if connected:
         logger.info("Database connection successful", extra={"type": "startup_db_connection"})
+        try:
+            await ensure_maintenance_setting()
+        except Exception:
+            logger.exception("Unable to ensure the maintenance setting exists")
     else:
         logger.error("Database connection failed", extra={"type": "startup_db_connection"})
     try:
@@ -61,25 +68,42 @@ app.add_middleware(RequestLoggingMiddleware)
 
 @app.middleware("http")
 async def maintenance_mode_middleware(request: Request, call_next):
-    if currentmode.lower() == "maintenance":
-        request_path = request.url.path.rstrip("/") or "/"
-        allowed_path = any(
-            request_path == allowed_path
-            or request_path.startswith(f"{allowed_path}/")
-            for allowed_path in MAINTENANCE_ALLOWED_PATHS
+    request_path = request.url.path.rstrip("/") or "/"
+    allowed_path = any(
+        request_path == allowed_path
+        or request_path.startswith(f"{allowed_path}/")
+        for allowed_path in MAINTENANCE_ALLOWED_PATHS
+    )
+
+    try:
+        maintenance_enabled = await get_setting_toggle("MAINTENANCE_MODE")
+    except Exception:
+        logger.exception("Unable to determine maintenance mode")
+        if allowed_path:
+            return await call_next(request)
+
+        return JSONResponse(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            content={
+                "success": False,
+                "message": "Service is temporarily unavailable while its status is checked.",
+                "data": None,
+                "error": "Service status unavailable",
+            },
+            headers={"Retry-After": "60"},
         )
 
-        if not allowed_path:
-            return JSONResponse(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                content={
-                    "success": False,
-                    "message": "Service is temporarily unavailable for maintenance.",
-                    "data": None,
-                    "error": "Maintenance mode",
-                },
-                headers={"Retry-After": "3600"},
-            )
+    if maintenance_enabled and not allowed_path:
+        return JSONResponse(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            content={
+                "success": False,
+                "message": "Service is temporarily unavailable for maintenance.",
+                "data": None,
+                "error": "Maintenance mode",
+            },
+            headers={"Retry-After": "3600"},
+        )
 
     return await call_next(request)
 

@@ -15,6 +15,7 @@ from security.auth import token_required
 from utils import auth_util
 
 from services.registration_service import RegistrationService
+from services.system_services import get_setting_toggle
 
 from db.models.team_registration import(
     TeamRegistration,
@@ -50,6 +51,9 @@ async def participate_on_team_event(
     _ = Depends(rate_limiter(max_tokens=5, refill_rate=0.2, mode="user")),
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key")
 ):
+    if not await get_setting_toggle("ALLOW_REGISTRATION"):
+        raise HTTPException(status_code=503, detail="Event joining is partialy in Stoped")
+    
     user_id = user_data["user_id"]
     if not is_valid_team_name(team_name):
         logger.warning("invalid team name", extra={"user_id": user_id, "team_name": team_name})
@@ -85,7 +89,8 @@ async def join_team(
     _ = Depends(rate_limiter(max_tokens=5, refill_rate=0.5, mode="user"))
 
 ):
-    # user_id = 1 
+    if not await get_setting_toggle("ALLOW_REGISTRATION"):
+        raise HTTPException(status_code=503, detail="Event joining is partialy in Stoped")
     user_id = user_data["user_id"]
     try:
         event_details = (

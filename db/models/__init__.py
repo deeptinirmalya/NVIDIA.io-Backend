@@ -10,6 +10,7 @@ from db.models.auth import (
     UserRole,
     UserStatus,
 )
+from db.models.email_log import EmailLog, EmailLogStatus
 from db.models.event import (
     Event,
     EventCategory,
@@ -25,6 +26,7 @@ from db.models.single_registration import (
     SingleRegistrationPaymentStatus,
     SingleRegistrationStatus,
 )
+from db.models.system_setting import SystemSetting
 from db.models.team_member import TeamMember, TeamMemberRole
 from db.models.team_registration import (
     TeamRegistration,
@@ -37,6 +39,8 @@ from db.models.webhook_events import WebhookEvent
 __all__ = [
     "AdminStats",
     "AuditLog",
+    "EmailLog",
+    "EmailLogStatus",
     "EmailVerificationStatus",
     "Event",
     "EventCategory",
@@ -54,6 +58,7 @@ __all__ = [
     "SingleRegistration",
     "SingleRegistrationPaymentStatus",
     "SingleRegistrationStatus",
+    "SystemSetting",
     "TeamMember",
     "TeamMemberRole",
     "TeamRegistration",

@@ -6,6 +6,11 @@ from pydantic import BaseModel, EmailStr, Field
 from pydantic import BaseModel, Field, model_validator, ConfigDict
 
 
+class SystemSettingToggleRequest(BaseModel):
+    id: int = Field(ge=1)
+    setting_key: str = Field(min_length=1, max_length=100)
+
+
 class EventStatus(str, Enum):
     DRAFT = "DRAFT"
     PUBLISHED = "PUBLISHED"
@@ -273,7 +278,64 @@ class NewSuperAdminRequest(BaseModel):
 
 
 
+class NotificationType(str, Enum):
+    ANNOUNCEMENT = "ANNOUNCEMENT"
+    INFORMATION = "INFORMATION"
+    IMPORTANT = "IMPORTANT"
+    REMINDER = "REMINDER"
+
+
+
 class EmailSentRequest(BaseModel):
-    reciver_emails: List[EmailStr]
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+
+    receiver_emails: List[EmailStr]
     cc_emails: List[EmailStr] | None = None
     bcc_emails: List[EmailStr] | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_receiver_emails(cls, data):
+        if isinstance(data, dict):
+            if "reciver_emails" in data and "receiver_emails" not in data:
+                data = dict(data)
+                data["receiver_emails"] = data.pop("reciver_emails")
+        return data
+    
+    # Notification Type
+    notification_type: NotificationType
+
+    # Email details
+    subject: str = Field(min_length=1, max_length=180)
+    heading: str = Field(min_length=1, max_length=120)
+    recipient_name: str | None = Field(default=None, max_length=100)
+    preheader: str | None = Field(default=None, max_length=120)
+
+    # Main content
+    main_message: str = Field(min_length=1, max_length=4000)
+
+    # Optional highlight section
+    highlight_title: str | None = Field(default=None, max_length=120)
+    highlight_message: str | None = Field(default=None, max_length=500)
+
+    # Optional secondary description
+    secondary_description: str | None = Field(default=None, max_length=1000)
+
+    # Optional important section
+    important_title: str | None = Field(default=None, max_length=120)
+    important_message: str | None = Field(default=None, max_length=1000)
+
+    # Optional event details
+    event_start_datetime: datetime | None = None
+    event_name: str | None = Field(default=None, max_length=150)
+    event_venue: str | None = Field(default=None, max_length=200)
+
+    # Closing
+    closing_message: str = Field(
+        default="Thank you for your attention and continued support. "
+                "We look forward to your active participation.",
+        max_length=500
+    )
+
+
+EmailTemplateInput = EmailSentRequest

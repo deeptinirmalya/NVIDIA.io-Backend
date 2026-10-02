@@ -39,7 +39,7 @@ async def add_super_admin(
     request: Request,
     db: AsyncSession = Depends(get_db),
     user_data: dict = Depends(token_required(allowed_roles=["SUPERADMIN"])),
-    _ = Depends(rate_limiter(max_tokens=1, refill_rate=0.01, mode="both"))
+    # _ = Depends(rate_limiter(max_tokens=1, refill_rate=0.01, mode="both"))
 ):
     user_id = user_data["user_id"]
     # user_id = 1

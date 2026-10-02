@@ -43,12 +43,13 @@ from security.rate_limiter import rate_limiter
 from security.auth import get_client_info, token_required
 from utils import auth_util, util
 from templates import email_templates 
-from engine.cache import get_value, set_value, delete_value
+from engine.cache import get_value, set_value
 from engine.bloomfilter import event_id_exists_in_bloom
 
 
 from services.razorpay_client import razorpay_client
 from services.registration_service import RegistrationService
+from services.system_services import get_setting_toggle
 
 
 
@@ -73,6 +74,16 @@ async def view_events(
     db: AsyncSession = Depends(get_db),
 ):
     cache_key = "all_events:summary"
+
+    maintenance_enabled = await get_setting_toggle("MAINTENANCE_MODE")
+    if (
+        maintenance_enabled
+        and not await get_setting_toggle("ALLOW_CATALOG_DURING_MAINTENANCE")
+    ):
+        raise HTTPException(status_code=503, detail="System is partially in maintenance")
+
+    if not await get_setting_toggle("ALLOW_CATALOG"):
+        raise HTTPException(status_code=503, detail="Event catalogs are disabled")
 
     try:
         cached = await get_value(cache_key)
@@ -145,6 +156,7 @@ async def get_event_details(
     _= Depends(rate_limiter(max_tokens=10, refill_rate=0.5, mode="both"))
 ):
     cache_key = f"event_{event_id}_details"
+
     try:
         bloom_exists = await event_id_exists_in_bloom(event_id)
         if not bloom_exists:
@@ -200,8 +212,10 @@ async def participate_on_single_event(
     _ = Depends(rate_limiter(max_tokens=5, refill_rate=0.2, mode="user")),
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key")
 ):
+    if not await get_setting_toggle("ALLOW_REGISTRATION"):
+        raise HTTPException(status_code=503, detail="Event joining is partialy in Stoped")
+    
     user_id = user_data["user_id"]
-
     try:
         # 1. Check event availability
         event_details = await RegistrationService.check_single_event_availability_for_participation(db, event_id, user_id)

@@ -1,36 +1,190 @@
 import logging
-from fastapi import APIRouter, Depends, Request, Response, HTTPException, status, Query, Header
+from fastapi import APIRouter, Depends, Request, HTTPException, Query
 from fastapi.responses import JSONResponse
 
 
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, update, desc, asc, func
+from sqlalchemy import select, desc, func
 
 from db.session import get_db
 from security.auth import token_required
 from security.rate_limiter import rate_limiter
-from utils import auth_util, util
+from engine.cache import delete_values, set_value
+
 
 from db.models.admin_states import AdminStats
 from db.models.audit_log import AuditLog
 from db.models.auth import User
+from db.models.event import Event
+from db.models.system_setting import SystemSetting
 
-
-
-
-
-
-from core.config import settings
 
 from ..others import request_code_to_superadmin
+from ..schemas import SystemSettingToggleRequest
 
+from services.auditlog_service import create_audit_log
 
 logger = logging.getLogger("Super-admin-system-Management")
 
 
 superadmin_system_management_router = APIRouter()
 
-REASON_TO_REQUEST_CODE = ["NEW_SUPER_ADMIN_ADD", "ADD_NEW_ADMIN"]
+REASON_TO_REQUEST_CODE = ["ADD_NEW_SUPER_ADMIN", "ADD_NEW_ADMIN"]
+
+
+
+@superadmin_system_management_router.get("/settings")
+async def list_system_settings(
+    db: AsyncSession = Depends(get_db),
+    user_data: dict = Depends(token_required(allowed_roles=["SUPERADMIN"])),
+    _ = Depends(rate_limiter(max_tokens=10, refill_rate=0.5, mode="both")),
+):
+    user_id = user_data["user_id"]
+    try:
+        result = await db.execute(
+            select(
+                SystemSetting.id,
+                SystemSetting.setting_key,
+                SystemSetting.toggle_on,
+                SystemSetting.last_used_at,
+            ).order_by(SystemSetting.setting_key)
+        )
+        settings_list = [
+            {
+                "setting_id": row.id,
+                "setting_key": row.setting_key,
+                "toggle_on": row.toggle_on,
+                "last_used_at": row.last_used_at.isoformat() if row.last_used_at else None,
+            }
+            for row in result.all()
+        ]
+
+        return JSONResponse(
+            status_code=200,
+            content={
+                "success": True,
+                "message": "System settings retrieved successfully",
+                "data": settings_list,
+                "error": None,
+            },
+        )
+    except Exception as e:
+        logger.exception(
+            "exception during system settings retrieval",
+            extra={"user_id": user_id, "error": str(e)},
+        )
+        raise HTTPException(status_code=500, detail="Internal Server Error")
+
+
+@superadmin_system_management_router.delete("/clear-cache")
+async def clear_event_and_setting_cache(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    user_data: dict = Depends(token_required(allowed_roles=["SUPERADMIN"])),
+    _ = Depends(rate_limiter(max_tokens=2, refill_rate=0.1, mode="both")),
+):
+    user_id = user_data["user_id"]
+    try:
+        setting_keys = (await db.scalars(select(SystemSetting.setting_key))).all()
+        cache_keys = {
+            "all_events:summary",
+            *setting_keys,
+        }
+        deleted_key_count = await delete_values(sorted(cache_keys))
+
+        await create_audit_log(
+            request=request,
+            user_id=user_id,
+            action="APPLICATION_CACHE_CLEARED",
+            entity_type="CACHE",
+            description="Event and system-setting caches cleared by superadmin",
+            metadata={"deleted_key_count": deleted_key_count},
+        )
+
+        return JSONResponse(
+            status_code=200,
+            content={
+                "success": True,
+                "message": "Event and system-setting caches cleared successfully",
+                "data": {"deleted_key_count": deleted_key_count},
+                "error": None,
+            },
+        )
+    except Exception as e:
+        logger.exception(
+            "exception during event and system-setting cache clearing",
+            extra={"user_id": user_id, "error": str(e)},
+        )
+        raise HTTPException(status_code=500, detail="Internal Server Error")
+
+
+@superadmin_system_management_router.patch("/change-settings")
+async def toggle_system_setting(
+    setting_data: SystemSettingToggleRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    user_data: dict = Depends(token_required(allowed_roles=["SUPERADMIN"])),
+    _ = Depends(rate_limiter(max_tokens=5, refill_rate=0.2, mode="both")),
+):
+    user_id = user_data["user_id"]
+    try:
+        setting = await db.scalar(
+            select(SystemSetting)
+            .where(
+                SystemSetting.id == setting_data.id,
+                SystemSetting.setting_key == setting_data.setting_key,
+            )
+            .with_for_update()
+        )
+        if setting is None:
+            raise HTTPException(status_code=404, detail="System setting not found")
+        if setting.toggle_on is None:
+            raise HTTPException(
+                status_code=409,
+                detail="System setting toggle value must be true or false",
+            )
+
+        previous_value = setting.toggle_on
+        setting.toggle_on = not previous_value
+        await db.commit()
+
+
+        await set_value(setting.setting_key, setting.toggle_on, None)
+
+        await create_audit_log(
+            request=request,
+            user_id=user_id,
+            action="SYSTEM_SETTING_TOGGLED",
+            entity_type="SYSTEM_SETTING",
+            entity_id=setting.id,
+            description="System setting toggled by superadmin",
+            metadata={
+                "setting_key": setting.setting_key,
+                "previous_value": previous_value,
+                "updated_value": setting.toggle_on,
+            },
+        )
+
+        return JSONResponse(
+            status_code=200,
+            content={
+                "success": True,
+                "message": "System setting updated successfully",
+                "data": None,
+                "error": None,
+            },
+        )
+    except HTTPException as httpe:
+        await db.rollback()
+        raise httpe
+    except Exception as e:
+        await db.rollback()
+        logger.exception(
+            "exception during system setting toggle",
+            extra={"user_id": user_id, "error": str(e)},
+        )
+        raise HTTPException(status_code=500, detail="Internal Server Error")
+
 
 @superadmin_system_management_router.post("/request-for-code")
 async def request_code_to_moderator(
@@ -201,5 +355,64 @@ async def view_audit_logs(
         logger.exception(
             "exception during audit log retrieval",
             extra={"user_id": requesting_user_id, "error": str(e)},
+        )
+        raise HTTPException(status_code=500, detail="Internal Server Error")
+
+
+@superadmin_system_management_router.get("/audit-logs/{audit_log_id:int}")
+async def view_audit_log_details(
+    audit_log_id: int,
+    db: AsyncSession = Depends(get_db),
+    requesting_user: dict = Depends(token_required(allowed_roles=["SUPERADMIN"])),
+    _ = Depends(rate_limiter(max_tokens=10, refill_rate=0.5, mode="both")),
+):
+    requesting_user_id = requesting_user["user_id"]
+    try:
+        result = await db.execute(
+            select(
+                AuditLog.id,
+                AuditLog.user_id,
+                User.email.label("user_email"),
+                User.role.label("user_role"),
+                AuditLog.action,
+                AuditLog.entity_type,
+                AuditLog.entity_id,
+                AuditLog.description,
+                AuditLog.metadata_.label("metadata"),
+                AuditLog.ip_address,
+                AuditLog.user_agent,
+                AuditLog.created_at,
+            )
+            .outerjoin(User, User.id == AuditLog.user_id)
+            .where(AuditLog.id == audit_log_id)
+        )
+        row = result.mappings().one_or_none()
+        if row is None:
+            raise HTTPException(status_code=404, detail="Audit log not found")
+
+        audit_log = dict(row)
+        audit_log["created_at"] = audit_log["created_at"].isoformat()
+        if audit_log["user_role"] is not None:
+            audit_log["user_role"] = audit_log["user_role"].value
+
+        return JSONResponse(
+            status_code=200,
+            content={
+                "success": True,
+                "message": "Audit log details retrieved successfully",
+                "data": audit_log,
+                "error": None,
+            },
+        )
+    except HTTPException as httpe:
+        raise httpe
+    except Exception as e:
+        logger.exception(
+            "exception during audit log detail retrieval",
+            extra={
+                "audit_log_id": audit_log_id,
+                "user_id": requesting_user_id,
+                "error": str(e),
+            },
         )
         raise HTTPException(status_code=500, detail="Internal Server Error")

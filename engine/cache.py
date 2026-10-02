@@ -20,6 +20,9 @@ redis_client = Redis(
     token=settings.UPSTASH_REDIS_REST_TOKEN
 )
 
+# ====================== KEYS ===========================
+KEY_FOR_MAINTENENACE = "MAINTENANCE_MODE"
+# ============================ KEYS =========================
 
 async def set_value(key: str, value, expire: int | None = 3600):
     await redis_client.set(
@@ -38,8 +41,19 @@ async def get_value(key: str):
     return json.loads(value)
 
 
+async def key_exists(key: str) -> bool:
+    return bool(await redis_client.exists(key))
+
+
 async def delete_value(key: str):
     await redis_client.delete(key)
+
+
+async def delete_values(keys: list[str]) -> int:
+    if not keys:
+        return 0
+
+    return int(await redis_client.delete(*keys))
 
 
 
