@@ -8,6 +8,7 @@ SQLAlchemy==2.0.41
 asyncmy==0.2.10
 
 
+
 # ─── Configuration / Environment ──────────────────────────────────────────────
 pydantic==2.11.7
 pydantic-settings==2.10.1
@@ -16,6 +17,10 @@ python-dotenv==1.1.1
 # ─── Authentication & Security ────────────────────────────────────────────────
 PyJWT==2.10.1            # JWT encode/decode (import jwt)
 argon2-cffi==23.1.0      # Argon2 password hashing (import argon2)
+cryptography==45.0.5    # Fernet encryption
+firebase-admin==7.5.0    # Firebase authentication
+pyotp==2.9.0             # TOTP-based one-time passwords
+qrcode[pil]==8.1         # QR code generation with Pillow image support
 
 
 # ─── HTTP Clients ─────────────────────────────────────────────────────────────
@@ -31,7 +36,10 @@ celery==5.5.3            # Celery worker (CloudAMQP broker)
 
 # ─── Email ────────────────────────────────────────────────────────────────────
 mailtrap==2.7.0          # Mailtrap email client (import mailtrap)
-boto3==1.35.99
+cloudinary==1.46.2       # Cloudinary media uploads
+
+# ─── Analytics ────────────────────────────────────────────────────────────────
+posthog==7.39.1          # Product analytics
 
 # ─── Error Monitoring ─────────────────────────────────────────────────────────
 sentry-sdk[fastapi]==2.34.0

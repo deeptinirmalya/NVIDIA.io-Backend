@@ -8,13 +8,13 @@ from core.config import settings
 # from redis.asyncio import Redis
 
 # redis_client = Redis(
-#     host="127.0.0.1",
+#     host="localhost",
 #     port=6379,
 #     decode_responses=True
 # )
 
-# Initialize Upstash Redis Cache via REST (HTTP)
-# This requires the 'upstash-redis' library
+
+
 redis_client = Redis(
     url=settings.UPSTASH_REDIS_REST_URL, 
     token=settings.UPSTASH_REDIS_REST_TOKEN

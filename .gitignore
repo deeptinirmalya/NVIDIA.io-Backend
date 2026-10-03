@@ -15,5 +15,6 @@ env/
 .vscode/
 .idea/
 
-# Database
-*.sqlite3
+
+migratation-ss.txt
+miidelweare_for_deploye.py

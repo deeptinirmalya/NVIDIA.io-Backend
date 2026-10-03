@@ -29,19 +29,13 @@ class Settings(BaseSettings):
     #encryption
     ENCRYPTION_KEY: str = os.getenv("ENCRYPTION_KEY", "fallback-secret-key-at-least-64-chars-long")
     
-    # Engine 1: Rate Limiter (Local Redis)
     REDIS_URL: str = os.getenv("REDIS_URL", "redis://localhost:6379/1")
     
-    # Engine 2: Cache (Upstash Redis REST)
     UPSTASH_REDIS_REST_URL: str = os.getenv("UPSTASH_REDIS_REST_URL")
     UPSTASH_REDIS_REST_TOKEN: str = os.getenv("UPSTASH_REDIS_REST_TOKEN")
     
-    # Engine 3: Celery (CloudAMQP)
-    CELERY_WORKER_BROKER_URL: str = os.getenv("CELERY_WORKER_BROKER_URL")
+    CELERY_WORKER_BROKER_URL: str | None = os.getenv("CELERY_WORKER_BROKER_URL")
     
-    # Database
-    # MONGODB_URL: str = os.getenv("MONGODB_URL")
-    # MONGODB_DB_NAME: str = os.getenv("MONGODB_DB_NAME", "sjn_demo_db")
 
     TIDB_HOST: str = os.getenv("TIDB_HOST")
     TIDB_PORT: int = os.getenv("TIDB_PORT")
@@ -79,12 +73,6 @@ class Settings(BaseSettings):
     
     @property
     def COOKIE_SECURE(self) -> bool:
-        """
-        Determine if cookies should be Secure flag.
-        - Explicit env var takes precedence
-        - Otherwise: True for production, False for development
-        - CRITICAL: Over HTTP, Secure cookies are rejected by browsers
-        """
         if self._COOKIE_SECURE_ENV is not None:
             return self._COOKIE_SECURE_ENV.lower() == "true"
         # Default: True for production (HTTPS), False for development (HTTP)
