@@ -1,7 +1,7 @@
-import razorpay
 import logging
 from fastapi import APIRouter, Depends, Request, Response, HTTPException, status, Query, Header
 from fastapi.responses import JSONResponse
+from razorpay.errors import SignatureVerificationError
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import and_, exists, func, or_, select, cast, String
@@ -35,7 +35,7 @@ def verify_razorpay_signature_sdk(params_dict: dict) -> bool:
     try: 
         razorpay_client.utility.verify_payment_signature(params_dict)
         return True 
-    except razorpay.SignatureVerificationError: 
+    except SignatureVerificationError:
         return False
 
 class PaymentServices:
