@@ -1,6 +1,5 @@
 from datetime import datetime
 from fastapi import APIRouter, Depends, Query, Request, HTTPException
-from beanie import PydanticObjectId
 from fastapi.responses import JSONResponse
 from sqlalchemy import func, select, asc, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -628,6 +627,5 @@ async def student_profile_deails(
     except Exception as e:
         logger.exception("exception during profile fetching", extra={"user_id": user_id, "admin_id": admin_id, "error": str(e)})
         raise HTTPException(status_code=500, detail="Internal Server Error")
-
 
 
