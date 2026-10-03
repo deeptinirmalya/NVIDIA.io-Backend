@@ -1,6 +1,5 @@
 from typing import Optional
 from contextlib import asynccontextmanager
-import hmac
 import logging
 from urllib.parse import urlsplit
 
@@ -13,6 +12,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from api.api import api_router
 from core.config import settings
 from db.session import close_database, test_database_connection
+from engine.bloomfilter import close_event_bloom, ensure_event_bloom
 from monitoring.logger import setup_logging
 from monitoring.middleware import RequestLoggingMiddleware
 from monitoring.sentry import init_sentry
@@ -22,7 +22,6 @@ init_sentry()
 setup_logging()
 
 ENVIRONMENT = (settings.PYTHON_ENV or "development").lower()
-DEPLOYMENT_PLATFORM = settings.DEPLOYE_PLATFORM
 CORS_ORIGINS = settings.BACKEND_CORS_ORIGINS
 
 currentmode = "normal"
@@ -50,9 +49,16 @@ async def lifespan(app: FastAPI):
     else:
         logger.error("Database connection failed", extra={"type": "startup_db_connection"})
     try:
+        await ensure_event_bloom()
+    except Exception:
+        logger.exception("Unable to ensure the event Bloom filter exists")
+    try:
         yield
     finally:
-        await close_database()
+        try:
+            await close_event_bloom()
+        finally:
+            await close_database()
 
 
 app = FastAPI(
@@ -108,55 +114,24 @@ async def maintenance_mode_middleware(request: Request, call_next):
     return await call_next(request)
 
 
-if DEPLOYMENT_PLATFORM == "vps":
-    class VPSCloudflareMiddleware(BaseHTTPMiddleware):
-        async def dispatch(self, request: Request, call_next):
-            if ENVIRONMENT == "development":
-                client_ip = request.client.host if request.client else "127.0.0.1"
-                user_agent = request.headers.get("user-agent", "DevClient/1.0")
-            else:
-                client_ip = request.headers.get("cf-connecting-ip")
-                if not client_ip:
-                    client_ip = request.client.host if request.client else "Unknown"
-                user_agent = request.headers.get("user-agent", "Unknown")
+class VPSCloudflareMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        if ENVIRONMENT == "development":
+            client_ip = request.client.host if request.client else "127.0.0.1"
+            user_agent = request.headers.get("user-agent", "DevClient/1.0")
+        else:
+            client_ip = request.headers.get("cf-connecting-ip")
+            if not client_ip:
+                client_ip = request.client.host if request.client else "Unknown"
+            user_agent = request.headers.get("user-agent", "Unknown")
 
-            request.state.client_ip = client_ip
-            request.state.user_agent = user_agent
+        request.state.client_ip = client_ip
+        request.state.user_agent = user_agent
 
-            return await call_next(request)
-
-    app.add_middleware(VPSCloudflareMiddleware)
+        return await call_next(request)
 
 
-elif DEPLOYMENT_PLATFORM == "render":
-    SECRET_HEADER_NAME = settings.RENDER_SECRET_HEADER_NAME
-    SECRET_HEADER_VALUE = settings.RENDER_SECRET_HEADER_VALUE
-
-    class RenderSecurityMiddleware(BaseHTTPMiddleware):
-        async def dispatch(self, request: Request, call_next):
-            if ENVIRONMENT == "development":
-                client_ip = request.client.host if request.client else "127.0.0.1"
-                user_agent = request.headers.get("user-agent", "DevClient/1.0")
-            else:
-                incoming_secret = request.headers.get(SECRET_HEADER_NAME)
-                if not incoming_secret or not hmac.compare_digest(incoming_secret, SECRET_HEADER_VALUE):
-                    return JSONResponse(
-                        status_code=status.HTTP_403_FORBIDDEN,
-                        content={"detail": "Forbidden: Direct access to origin server is blocked."}
-                    )
-
-                client_ip = request.headers.get("cf-connecting-ip")
-                if not client_ip:
-                    client_ip = request.client.host if request.client else "Unknown"
-
-                user_agent = request.headers.get("user-agent", "Unknown")
-
-            request.state.client_ip = client_ip
-            request.state.user_agent = user_agent
-
-            return await call_next(request)
-
-    app.add_middleware(RenderSecurityMiddleware)
+app.add_middleware(VPSCloudflareMiddleware)
 
 
 ALLOWED_ORIGINS = set(settings.BACKEND_CORS_ORIGINS)

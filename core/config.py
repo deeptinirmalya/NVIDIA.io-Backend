@@ -10,7 +10,6 @@ class Settings(BaseSettings):
     
     # environment
     PYTHON_ENV: str = os.getenv("PYTHON_ENV", "development")
-    DEPLOYE_PLATFORM: str = os.getenv("DEPLOYE_PLATFORM", "vps")
 
     @property
     def is_production(self) -> bool:
@@ -19,9 +18,6 @@ class Settings(BaseSettings):
     ARGON2_RAM_SIZE: int = os.getenv("ARGON2_RAM_SIZE")
 
     PAPPER: str = os.getenv("PAPPER")
-
-    RENDER_SECRET_HEADER_NAME: str = os.getenv("RENDER_SECRET_HEADER_NAME")
-    SECRET_HEADER_VALUE: str = os.getenv("SECRET_HEADER_VALUE")
 
     IS_REAL: bool = os.getenv("IS_REAL", "False").lower() == "true"
     
@@ -116,14 +112,6 @@ class Settings(BaseSettings):
         # In development (HTTP), use a plain name so Postman/browsers accept it.
         # PRODUCTION: __Host-access_token
         return "__Host-access_token" if self.COOKIE_SECURE else "access_token"
-
-
-    RENDER_SECRET_HEADER_NAME: str = os.getenv("RENDER_SECRET_HEADER_NAME", "shgdjhgsdhjgsdhjsd")
-    SECRET_HEADER_VALUE: str = os.getenv("SECRET_HEADER_VALUE", "sgdyutsudtyusghjgshygs")
-
-    
-
-
 
 
     

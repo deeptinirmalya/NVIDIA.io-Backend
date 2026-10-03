@@ -35,7 +35,7 @@ async def send_email(
     request: Request,
     db: AsyncSession = Depends(get_db),
     user_data: dict = Depends(token_required(allowed_roles=["SUPERADMIN"])),
-    # _ = Depends(rate_limiter(max_tokens=1, refill_rate=0.1, mode="both"))
+    _ = Depends(rate_limiter(max_tokens=1, refill_rate=0.1, mode="both"))
 ):
     try:
         priority = None

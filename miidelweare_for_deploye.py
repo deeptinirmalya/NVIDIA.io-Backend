@@ -70,61 +70,6 @@
 
 # ======================================================================================================================================================================================================
 
-# 2. Middleware for Render (Verifies Secret Header + Extracts IP & Agent)
-# On Render, the middleware enforces security first. If a request comes without the correct X-Via-Cloudflare token, it immediately returns an HTTP 403 Forbidden error, stopping unauthorized visitors from accessing your Render backend directly.
-
-# Python
-# from fastapi import FastAPI, Request, status
-# from fastapi.responses import JSONResponse
-# from starlette.middleware.base import BaseHTTPMiddleware
-# import hmac
-
-# app = FastAPI()
-
-# # Configuration: Store your actual secret token here (or load from environment variables)
-# SECRET_HEADER_NAME = "x-via-cloudflare"
-# SECRET_HEADER_VALUE = "your_super_secret_token_12345"
-
-# class RenderSecurityMiddleware(BaseHTTPMiddleware):
-#     async def dispatch(self, request: Request, call_next):
-#         # 1. Extract the secret header added by Cloudflare Transform Rules
-#         incoming_secret = request.headers.get(SECRET_HEADER_NAME)
-
-#         # 2. Validate secret header using secure constant-time comparison
-#         if not incoming_secret or not hmac.compare_digest(incoming_secret, SECRET_HEADER_VALUE):
-#             return JSONResponse(
-#                 status_code=status.HTTP_403_FORBIDDEN,
-#                 content={"detail": "Forbidden: Direct access to origin server is blocked."}
-#             )
-
-#         # 3. Extract Real Client IP & User-Agent
-#         client_ip = request.headers.get("cf-connecting-ip")
-#         if not client_ip:
-#             client_ip = request.client.host if request.client else "Unknown"
-
-#         user_agent = request.headers.get("user-agent", "Unknown")
-
-#         # 4. Attach extracted variables to Request State
-#         request.state.client_ip = client_ip
-#         request.state.user_agent = user_agent
-
-#         response = await call_next(request)
-#         return response
-
-# # Register the middleware in FastAPI
-# app.add_middleware(RenderSecurityMiddleware)
-
-
-# # Example Routes
-# @app.get("/employee/dashboard")
-# async def employee_dashboard(request: Request):
-#     return {
-#         "status": "Authenticated via Cloudflare",
-#         "client_ip": request.state.client_ip,
-#         "user_agent": request.state.user_agent,
-#     }
-
-
 # ====================================================================================================================================
 
 # Loophole 1: The "Other Cloudflare Account" Attack (VPS)
@@ -172,23 +117,6 @@
 # sudo ufw allow from 2c0f:f240::/32 to any port 80,443 proto tcp
 # (Or disable IPv6 on your VPS entirely if you do not use it).
 
-# Loophole 3: Transform Rule Setting on Cloudflare (Render)
-# The Threat
-# An attacker discovers your Render backend URL (employee.onrender.com) and tries sending a fake header X-Via-Cloudflare: guessed_token.
-
-# If your Cloudflare Transform Rule is set to "Add static" instead of "Set static", Cloudflare will append a second header rather than overwriting the client's input.
-
-# The Seal (Use "Set Static")
-# When setting up the Request Header Modification rule in Cloudflare Transform Rules:
-
-# Select Set static (NOT "Add static").
-
-# "Set static" forces Cloudflare to overwrite any existing X-Via-Cloudflare header sent by the client, neutralizing any client header-spoofing attempt before the request reaches Render.
-
-# The GoalYou want to secure your Render app (employee.onrender.com) so that ONLY requests coming through Cloudflare are allowed. You do this by making Cloudflare attach a secret key header:X-Via-Cloudflare: my_secret_123The Attack ScenarioA hacker finds out your direct Render backend address: [https://employee.onrender.com](https://employee.onrender.com).
-# If the hacker opens Postman or cURL on their laptop and manually sends a request directly to Render with the header:X-Via-Cloudflare: my_secret_123If they guess or steal your secret key, Render's Python code would accept it!Even worse: What if the hacker sends their fake request through Cloudflare, hoping Cloudflare passes their fake header to Render?The Vulnerability (If Misconfigured in Cloudflare)When setting up Cloudflare Transform Rules, Cloudflare gives you options on how to handle headers:  ❌ Scenario A: What happens if Cloudflare "Appends" / "Adds" headers?If a hacker sends a request through Cloudflare with a fake header: X-Via-Cloudflare: WRONG_KEYThe hacker's request reaches Cloudflare carrying X-Via-Cloudflare: WRONG_KEY.Cloudflare's rule appends your secret key to the request.  The request arrives at Render with TWO values or a merged list:X-Via-Cloudflare: WRONG_KEY, my_secret_123When your Python middleware reads request.headers.get("x-via-cloudflare"), it might get confused, read WRONG_KEY, fail the check, or behave unpredictably.The Fix: "Set Static"✅ Scenario B: Using "Set Static" (The Secure Way)In Cloudflare Transform Rules, you choose Set static instead of adding/appending:  The hacker sends a request carrying X-Via-Cloudflare: WRONG_KEY.Cloudflare sees Set static. It wipes out/overwrites any client-supplied X-Via-Cloudflare header.  Cloudflare replaces it with your official key: X-Via-Cloudflare: my_secret_123.The request arrives at Render with ONLY ONE clean, untampered header:X-Via-Cloudflare: my_secret_123
-
-
 # ===========================================================================================================================================================================================================================
 
 # ******************************** CROS ************************************************************************
@@ -206,7 +134,7 @@
 # FastAPI includes a built-in CORSMiddleware to restrict allowed origins.  
 # davidmuraya.com
 
-# Add this to your FastAPI Apps (VPS & Render):
+# Add this to your FastAPI Apps (VPS):
 # Python
 # from fastapi import FastAPI
 # from fastapi.middleware.cors import CORSMiddleware
@@ -258,7 +186,7 @@
 #             content={"detail": "Access forbidden: Invalid or missing Origin domain."}
 #         )
 # Layer 3: Cloudflare WAF Rule (Block at the Edge)
-# To block unauthorized traffic before it even touches your VPS or Render server, you can set a rule directly in Cloudflare:
+# To block unauthorized traffic before it even touches your VPS server, you can set a rule directly in Cloudflare:
 
 # Go to Cloudflare Dashboard → Security → WAF → Custom Rules.
 

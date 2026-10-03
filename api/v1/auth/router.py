@@ -1,5 +1,6 @@
 import uuid
 import httpx
+import asyncio
 import logging
 from datetime import timedelta
 from fastapi import APIRouter, Depends, Request, Response, HTTPException, status, Query, Header
@@ -7,9 +8,7 @@ from fastapi.responses import JSONResponse
 import firebase_admin
 from firebase_admin import credentials, auth
 from typing import Optional
-import hashlib
-import secrets
-import re
+
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update, desc, asc
@@ -270,7 +269,8 @@ async def google(
             role=UserRole.STUDENT,
             is_verified=True,
             status=UserStatus.ACTIVE,
-            created_at=now
+            created_at=now,
+            last_loig=now
         )
 
         db.add(new_user)
@@ -278,13 +278,32 @@ async def google(
         await db.flush()
         await db.refresh(new_user)
 
-        # hit giet api and verify 1st then add the data to profile table for now bwlo is the demo data
+        url = "https://masterapi.deepti.qd.je/api/college-student-data"
+        async with httpx.AsyncClient() as http_client:
+            response = await http_client.get(url)
+
+        try:
+            response.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            raise HTTPException(status_code=502,detail="College student data service returned an error") from exc
+
+        try:
+            student_response = response.json()
+        except ValueError as exc:
+            raise HTTPException(status_code=502,detail="College student data service returned invalid JSON") from exc
+
+        if not isinstance(student_response, dict):
+            raise HTTPException(status_code=502,detail="College student data service returned an invalid response")
+        if student_response.get("success") is not True:
+            raise HTTPException(status_code=502,detail=student_response.get("message", "Unable to retrieve college student data"))
+
+        student_details = student_response.get("data")
 
         new_profile = Profile(
             user_id = new_user.id,
-            roll_no="24CSEAIML189",
-            contact_no="78921545567",
-            name="sir ijack",
+            roll_no=student_details["roll_number"],
+            contact_no=student_details["mobile_no"],
+            name=student_details["name"],
             semester=5,
             academic_session="2025-2029",
             created_at=now

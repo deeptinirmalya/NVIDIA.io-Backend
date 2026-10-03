@@ -33,10 +33,10 @@ from db.models.team_registration import(
 )
 from db.models.team_member import TeamMember
 from db.models.auth import User, UserRole, Profile
-
-
 from db.models.admin_states import AdminStats
 
+
+from services.system_services import get_setting_toggle
 
 
 
@@ -55,6 +55,9 @@ async def admin_dashboard(
     _rate_limit = Depends(rate_limiter(max_tokens=10, refill_rate=0.5, mode="both")),
 ):
     user_id = user_data["user_id"]
+
+    if not await get_setting_toggle("ALLOW_ADMIN"):
+        raise HTTPException(status_code=503, detail="Action Is Partialy Stopped")
     # user_id = 1
     try:
         stats = (
@@ -102,7 +105,8 @@ async def get_all_events(
     _rate_limit = Depends(rate_limiter(max_tokens=10, refill_rate=0.5, mode="both")),
 ):
     user_id = user_data["user_id"]
-    # user_id = 1
+    if not await get_setting_toggle("ALLOW_ADMIN"):
+        raise HTTPException(status_code=503, detail="Action Is Partialy Stopped")
     try:
         search_term = search.strip() if search else ""
         offset = (page - 1) * limit
@@ -151,6 +155,10 @@ async def update_event_status(
     _ = Depends(rate_limiter(max_tokens=5, refill_rate=0.5, mode="both"))
 ):
     user_id = user_data["user_id"]
+
+    if not await get_setting_toggle("ALLOW_ADMIN"):
+        raise HTTPException(status_code=503, detail="Action Is Partialy Stopped")
+    
     normalized_status = status.upper()
     valid_statuses = {EventStatus.DRAFT, EventStatus.PUBLISHED, EventStatus.CANCELLED}
 
@@ -216,7 +224,8 @@ async def get_all_events_id(
     _rate_limit = Depends(rate_limiter(max_tokens=10, refill_rate=0.5, mode="both")),
 ):
     user_id = user_data["user_id"]
-    # user_id = 1
+    if not await get_setting_toggle("ALLOW_ADMIN"):
+        raise HTTPException(status_code=503, detail="Action Is Partialy Stopped")
     try:
         search_term = search.strip() if search else ""
         offset = (page - 1) * limit
@@ -266,7 +275,8 @@ async def get_event_registrations(
     _rate_limit = Depends(rate_limiter(max_tokens=10, refill_rate=0.5, mode="both")),
 ):
     user_id = user_data["user_id"]
-    # user_id = 1
+    if not await get_setting_toggle("ALLOW_ADMIN"):
+        raise HTTPException(status_code=503, detail="Action Is Partialy Stopped")
     try:
         event_type = (
             await db.execute(
@@ -401,6 +411,8 @@ async def get_students(
     _rate_limit = Depends(rate_limiter(max_tokens=10, refill_rate=0.5, mode="both")),
 ):
     user_id = user_data["user_id"]
+    if not await get_setting_toggle("ALLOW_ADMIN"):
+        raise HTTPException(status_code=503, detail="Action Is Partialy Stopped")
     try:
         stmt = (
             select(
@@ -453,6 +465,10 @@ async def student_profile_deails(
     _ = Depends(rate_limiter(max_tokens=10, refill_rate=0.5, mode="both"))
 ):
     admin_id = user_data["user_id"]
+
+    if not await get_setting_toggle("ALLOW_ADMIN"):
+        raise HTTPException(status_code=503, detail="Action Is Partialy Stopped")
+    
     try:
 
         profile = (

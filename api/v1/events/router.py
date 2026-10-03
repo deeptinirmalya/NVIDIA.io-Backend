@@ -158,10 +158,10 @@ async def get_event_details(
     cache_key = f"event_{event_id}_details"
 
     try:
-        bloom_exists = await event_id_exists_in_bloom(event_id)
-        if not bloom_exists:
-            logger.warning("Event id rejected by bloom filter", extra={"event_id": event_id})
-            raise HTTPException(status_code=404, detail="No event found")
+        # bloom_exists = await event_id_exists_in_bloom(event_id)
+        # if not bloom_exists:
+        #     logger.warning("Event id rejected by bloom filter", extra={"event_id": event_id})
+        #     raise HTTPException(status_code=404, detail="No event found")
 
         data = await get_value(cache_key)
 

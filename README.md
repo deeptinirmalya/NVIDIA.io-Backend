@@ -35,6 +35,13 @@ A professional FastAPI backend structure with modular routing, database session 
    uvicorn main:app --reload
    ```
 
+## Environments and Deployment
+
+- **Development**: Set `PYTHON_ENV=development` and run the application locally with Uvicorn.
+- **VPS production**: Set `PYTHON_ENV=production` on the VPS and run the application behind the VPS web server/reverse proxy. Cloudflare's `CF-Connecting-IP` header is used when available.
+
+The application supports local development and VPS deployment; there is no hosting-platform selector.
+
 ## 📂 Project Structure
 - `api/`: API versioning and module routes.
 - `core/`: Global configuration and security settings.
