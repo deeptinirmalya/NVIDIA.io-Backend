@@ -45,4 +45,5 @@ posthog==7.39.1          # Product analytics
 sentry-sdk[fastapi]==2.34.0
 
 # ─── Payment Gateway ──────────────────────────────────────────────────────────
-razorpay==1.6.0          # Razorpay payment gateway (import razorpay)
+# razorpay==1.6.0          # Razorpay payment gateway (import razorpay)
+razorpay==1.4.2         # Razorpay payment gateway (import razorpay)
