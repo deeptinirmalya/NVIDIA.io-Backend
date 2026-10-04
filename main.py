@@ -296,3 +296,8 @@ app.include_router(api_router, prefix="/api")
 def read_root():
     logger.info("application start", extra={"key_deepti": "deepti value"})
     return {"message": "Welcome to v1 API"}
+
+
+@app.head("/health")
+def health_check():
+    return {"status": "ok"}
