@@ -4,6 +4,14 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+
+def _get_cookie_samesite() -> str:
+    value = os.getenv("COOKIE_SAMESITE", "lax").strip().lower()
+    if value not in {"strict", "lax", "none"}:
+        raise ValueError("COOKIE_SAMESITE must be 'strict', 'lax', or 'none'")
+    return value
+
+
 class Settings(BaseSettings):
     PROJECT_NAME: str = "sjn-demo"
     API_V1_STR: str = "/api/v1"
@@ -68,7 +76,7 @@ class Settings(BaseSettings):
     # Cookie Security
     # In development (HTTP): Must be False to allow cookies on localhost
     # In production (HTTPS): Must be True for security
-    COOKIE_SAMESITE: str = os.getenv("COOKIE_SAMESITE", "lax") # "strict", "lax", or "none"
+    COOKIE_SAMESITE: str = _get_cookie_samesite()
     _COOKIE_SECURE_ENV = os.getenv("COOKIE_SECURE", None)
     
     @property
