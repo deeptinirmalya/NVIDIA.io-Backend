@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import sys
 from collections.abc import AsyncGenerator
 from pathlib import Path
@@ -12,6 +13,8 @@ from sqlalchemy.ext.asyncio import (
 )
 
 from core.config import settings
+
+logger = logging.getLogger(__name__)
 
 
 if sys.platform == "win32":
@@ -104,8 +107,11 @@ async def test_database_connection() -> bool:
             result = await connection.execute(text("SELECT 1"))
             return result.scalar() == 1
 
-    except Exception as exc:
-        print(f"Database connection failed: {exc}")
+    except Exception:
+        logger.exception(
+            "Database connection test failed",
+            extra={"type": "startup_db_connection"},
+        )
         return False
 
 # ---------------------------------------------------------
