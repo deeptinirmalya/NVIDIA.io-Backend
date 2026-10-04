@@ -132,6 +132,7 @@ async def get_student_participations_by_roll_number(
                 select(
                     TeamRegistration.id.label("participation_id"),
                     TeamRegistration.team_name,
+                    TeamRegistration.team_status.label("team_status"),
                     Event.name.label("event_name"),
                     Event.participation_type.label("participation_type"),
                     TeamMember.created_at.label("joined_date"),
@@ -164,6 +165,7 @@ async def get_student_participations_by_roll_number(
             {
                 "participation_id": row["participation_id"],
                 "team_name": row["team_name"],
+                "team_status": row["team_status"].value,
                 "event_name": row["event_name"],
                 "participation_type": row["participation_type"],
                 "joined_date": row["joined_date"].isoformat() if row["joined_date"] else None,
@@ -393,4 +395,3 @@ async def logout_user(
         logger.exception(
             "Exception during user logout",extra={"superadmin_id": user_data["user_id"], "user_id": user_id, "error": str(e)})
         raise HTTPException(status_code=500, detail="Internal server error")
-
