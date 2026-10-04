@@ -1,14 +1,25 @@
 import os
+import logging
 from pydantic_settings import BaseSettings
 from dotenv import load_dotenv
 
 load_dotenv()
 
+logger = logging.getLogger(__name__)
+
 
 def _get_cookie_samesite() -> str:
-    value = os.getenv("COOKIE_SAMESITE", "lax").strip().lower()
+    raw_value = os.getenv("COOKIE_SAMESITE", "lax")
+    value = raw_value.strip().lower()
     if value not in {"strict", "lax", "none"}:
-        raise ValueError("COOKIE_SAMESITE must be 'strict', 'lax', or 'none'")
+        logger.error(
+            "Invalid COOKIE_SAMESITE value %r; expected 'strict', 'lax', or 'none'",
+            raw_value,
+        )
+        raise ValueError(
+            f"Invalid COOKIE_SAMESITE value {raw_value!r}; "
+            "expected 'strict', 'lax', or 'none'"
+        )
     return value
 
 
