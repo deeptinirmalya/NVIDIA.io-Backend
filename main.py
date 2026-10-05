@@ -31,7 +31,7 @@ MAINTENANCE_ALLOWED_PATHS = [
     "/api/v1/auth/superadmin-login",
     "/api/v1/event/catalogs",
     "/health",
-    "/"
+    "/",
     "/docs",
     "/docs/oauth2-redirect",
     "/openapi.json",
