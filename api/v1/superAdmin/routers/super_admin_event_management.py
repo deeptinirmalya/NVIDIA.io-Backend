@@ -171,6 +171,7 @@ async def create_event(
             is_paid=event_data.is_paid,
         )
         await add_event_id_to_bloom(new_event.id)
+        await delete_value("all_events:summary")
 
         await create_audit_log(
             request=request,
