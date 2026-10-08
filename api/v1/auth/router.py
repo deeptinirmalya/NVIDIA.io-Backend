@@ -340,7 +340,7 @@ async def google(
 
         await cServices.increase_student_count(db)
 
-        logger.info("Signup db initialization is complete", extra={"email": email})
+        logger.info("Signup db initialization is complete", extra={"email": email, "user_id": new_user.id})
 
         response = JSONResponse(
                     status_code=200, 
