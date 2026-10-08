@@ -270,7 +270,7 @@ async def google(
             is_verified=True,
             status=UserStatus.ACTIVE,
             created_at=now,
-            last_loig=now
+            last_login=now
         )
 
         db.add(new_user)
